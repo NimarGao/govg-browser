@@ -5,7 +5,7 @@ import Store from 'electron-store';
 
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 
-const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 QIHU 360EE';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -24,7 +24,8 @@ const store = new Store({
     ],
     settings: {
       defaultSearchEngine: 'bing',
-      startupUrl: 'swift://newtab'
+      startupUrl: 'swift://newtab',
+      flashMode: true
     }
   }
 });
@@ -292,40 +293,58 @@ function registerBlockerOnSession(sess) {
   const FLASH_UA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36 QIHU 360EE";
   sess.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
     try {
-      const url = new URL(details.url);
-      const isFlashSite = /4399|7k7k|2144|flash|game/i.test(url.hostname);
-      if (isFlashSite) {
-        details.requestHeaders['User-Agent'] = FLASH_UA;
+      const settings = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
+      if (settings.flashMode) {
+        const url = new URL(details.url);
+        const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(url.hostname);
+        if (isFlashSite) {
+          details.requestHeaders['User-Agent'] = FLASH_UA;
+        }
       }
     } catch {}
     callback({ cancel: false, requestHeaders: details.requestHeaders });
   });
 
-  // 拦截并优化 CSP 头部，安全豁免 Ruffle.js 所需的 CDN (unpkg.com) 及 blob: 协议，保障 Flash 仿真引擎在所有网站中完美运行
+  // 拦截并优化 CSP 头部，安全豁免 Ruffle.js 所需的 CDN (unpkg.com 和 cdn.jsdelivr.net) 及 blob: 协议，保障 Flash 仿真引擎在所有网站中完美运行
   sess.webRequest.onHeadersReceived(filter, (details, callback) => {
     const responseHeaders = { ...details.responseHeaders };
-    const cspKey = Object.keys(responseHeaders).find(k => k.toLowerCase() === 'content-security-policy');
-    if (cspKey) {
-      const cspValues = responseHeaders[cspKey];
-      if (Array.isArray(cspValues)) {
-        responseHeaders[cspKey] = cspValues.map(val => {
-          let modified = val;
-          // 宽松豁免 unpkg CDN 的 script 和 connect
-          if (modified.includes('script-src') && !modified.includes('https://unpkg.com')) {
-            modified = modified.replace('script-src', "script-src https://unpkg.com 'unsafe-eval' 'unsafe-inline'");
-          }
-          if (modified.includes('connect-src') && !modified.includes('https://unpkg.com')) {
-            modified = modified.replace('connect-src', 'connect-src https://unpkg.com');
-          }
-          if (modified.includes('worker-src') && !modified.includes('blob:')) {
-            modified = modified.replace('worker-src', 'worker-src blob:');
-          } else if (modified.includes('child-src') && !modified.includes('blob:')) {
-            modified = modified.replace('child-src', 'child-src blob:');
-          } else if (!modified.includes('worker-src') && !modified.includes('child-src')) {
-            modified += "; worker-src blob:; child-src blob:";
-          }
-          return modified;
-        });
+    const settings = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
+    
+    if (settings.flashMode) {
+      const cspKey = Object.keys(responseHeaders).find(k => k.toLowerCase() === 'content-security-policy');
+      if (cspKey) {
+        const cspValues = responseHeaders[cspKey];
+        if (Array.isArray(cspValues)) {
+          responseHeaders[cspKey] = cspValues.map(val => {
+            let modified = val;
+            
+            // 宽松豁免 unpkg 和 jsdelivr 的 script/connect/worker 等策略
+            if (modified.includes('script-src')) {
+              if (!modified.includes('https://unpkg.com')) {
+                modified = modified.replace('script-src', "script-src https://unpkg.com 'unsafe-eval' 'unsafe-inline'");
+              }
+              if (!modified.includes('https://cdn.jsdelivr.net')) {
+                modified = modified.replace('script-src', "script-src https://cdn.jsdelivr.net 'unsafe-eval' 'unsafe-inline'");
+              }
+            }
+            if (modified.includes('connect-src')) {
+              if (!modified.includes('https://unpkg.com')) {
+                modified = modified.replace('connect-src', 'connect-src https://unpkg.com');
+              }
+              if (!modified.includes('https://cdn.jsdelivr.net')) {
+                modified = modified.replace('connect-src', 'connect-src https://cdn.jsdelivr.net');
+              }
+            }
+            if (modified.includes('worker-src') && !modified.includes('blob:')) {
+              modified = modified.replace('worker-src', 'worker-src blob:');
+            } else if (modified.includes('child-src') && !modified.includes('blob:')) {
+              modified = modified.replace('child-src', 'child-src blob:');
+            } else if (!modified.includes('worker-src') && !modified.includes('child-src')) {
+              modified += "; worker-src blob:; child-src blob:";
+            }
+            return modified;
+          });
+        }
       }
     }
     callback({ cancel: false, responseHeaders });
@@ -523,13 +542,18 @@ ipcMain.handle('quicklinks:remove', (_event, id) => {
   return next;
 });
 
-ipcMain.handle('settings:get', () => store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab' }));
+ipcMain.handle('settings:get', () => store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true }));
 
 ipcMain.handle('settings:set', (_event, patch) => {
-  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab' });
+  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
   const next = { ...current, ...patch };
   store.set('settings', next);
   return next;
+});
+
+ipcMain.on('settings:get-flash-mode-sync', (event) => {
+  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
+  event.returnValue = !!current.flashMode;
 });
 
 ipcMain.handle('session:clear-all-data', async () => {
