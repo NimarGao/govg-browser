@@ -1,0 +1,63 @@
+{
+  "name": "govg-browser",
+  "version": "0.1.1",
+  "description": "A Windows browser built with React and Electron.",
+  "author": "Local",
+  "main": "electron/main.js",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "electron:dev": "cross-env NODE_ENV=development electron .",
+    "start": "concurrently -k \"npm.cmd run dev\" \"wait-on tcp:5173 && npm.cmd run electron:dev\"",
+    "build": "vite build",
+    "dist": "npm.cmd run build && electron-builder --win nsis portable",
+    "pack": "npm.cmd run build && electron-builder --dir"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "electron-store": "^10.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.0.7"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "cross-env": "^7.0.3",
+    "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.nimargao.govgbrowser",
+    "productName": "Govg Browser",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**",
+      "electron/**",
+      "package.json"
+    ],
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-portable.${ext}"
+    }
+  }
+}
