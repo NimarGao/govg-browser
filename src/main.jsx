@@ -601,9 +601,9 @@ function App() {
           </button>
         </div>
         <div className="window-controls macos-style">
-          <button className="mac-btn close" title="关闭" onClick={() => window.browserAPI.closeWindow()}></button>
           <button className="mac-btn minimize" title="最小化" onClick={() => window.browserAPI.minimizeWindow()}></button>
           <button className="mac-btn maximize" title="最大化" onClick={() => window.browserAPI.toggleMaximizeWindow()}></button>
+          <button className="mac-btn close" title="关闭" onClick={() => window.browserAPI.closeWindow()}></button>
         </div>
       </section>
 
