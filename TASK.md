@@ -1,24 +1,18 @@
-# Govg Browser 提升任务跟踪 - 第四阶段开发
+# Govg Browser 提升任务跟踪 - 第四阶段优化与功能还原 (v0.3.1)
 
-- `[x]` 1. 主进程支持双屏 View 隔离、UA 伪装与下载关联
-  - `[x]` 在 [main.js](file:///D:/ai/bs/electron/main.js) 中扩展 `tabViews` 映射为包含左右双 View 结构
-  - `[x]` 对所有 session（普通、无痕、分屏）统一覆写标准最新 Chrome User-Agent
-  - `[x]` 升级 IPC 通道 `views:create`, `views:destroy`, `views:select`, `views:set-bounds` 支持 `side` 参数
-  - `[x]` 确保分屏 session 自动绑定 adblocker 与下载监听器
-- `[x]` 2. 预加载脚本与防风控注入
-  - `[x]` 在 [preload.cjs](file:///D:/ai/bs/electron/preload.cjs) 扩展 views 控制 API 并传递 `side` 标识
-  - `[x]` 在 [webview-preload.cjs](file:///D:/ai/bs/electron/webview-preload.cjs) 头部注入抹除 `navigator.webdriver` 痕迹的防检测代码
-- `[x]` 3. 渲染进程 UI 布局、双屏状态及 Mac 按钮重构
-  - `[x]` 在 [main.jsx](file:///D:/ai/bs/src/main.jsx) 中将右上角窗口控制按钮重构为 macOS 三色交通灯结构
-  - `[x]` 扩展 Tab 状态，加入 `splitMode`、`rightUrl` 等字段，并新增分屏切换按钮
-  - `[x]` 渲染分屏双占位容器，挂载双 `ResizeObserver` 实时上报 bounds
-  - `[x]` 渲染右分屏独立的轻量级地址导航栏
-- `[x]` 4. 界面样式编写与美化
-  - `[x]` 在 [styles.css](file:///D:/ai/bs/src/styles.css) 中编写 macOS 控制按钮红黄绿及其 hover 细线字符样式
-  - `[x]` 编写双屏 50/50 宽度分割线及分屏下地址栏等 UI 布局样式
-- `[x]` 5. 功能运行测试与交付
-  - `[x]` 验证右上角 Mac 控制圆点样式与 Hover 图标渐显
-  - `[x]` 测试同一站点在左右双屏下的不同账号登录（Session 隔离验证）
-  - `[x]` 测试切换回单屏后左侧账号登录态的保留
-  - `[x]` 测试在 `bot.sannysoft.com` 上的防 webdriver 和 UA 检测结果
-  - `[x]` 更新版本号至 `0.3.0` 并使用规范中文注释进行 Git 提交推送
+- `[x]` 1. 前端 React 控制层与 UI 还原
+  - `[x]` 简化 `navigate` 接口并清除右侧导航参数
+  - `[x]` 简化 `handleBrowserShortcut` 缩放快捷键逻辑，仅处理单个视图
+  - `[x]` 重构 View 生命周期绑定，去除 `side` 参数，以 `tab.id` 为单 View 键值
+  - `[x]` 重构 `ResizeObserver` 以及 bounds 上报，绑定到单一 `stageRef` 容器
+  - `[x]` 移除顶部 toolbar 的“双屏分屏”按钮及 Lucide 库中的 `Columns` 导入
+  - `[x]` 移除右侧分屏及其专属工具栏 DOM 节点，还原 `webview-stage` 为单视图容器
+- `[x]` 2. 样式表清理
+  - `[x]` 彻底清除 [styles.css](file:///D:/ai/bs/src/styles.css) 尾部追加的双屏网格、右分屏工具栏及地址栏的所有 CSS 规则
+- `[x]` 3. 防风控与 macOS 控制按钮保留
+  - `[x]` 确保右上角 macOS 三色交通灯控制按钮及 Hover 细线字符完全正常工作
+  - `[x]` 确保 `webview-preload.cjs` 中跨越隔离沙箱向网页主世界（Main World）注入的 anti-detect 脚本完全保留且正常运行，以保障 Google 账号登录通过验证
+- `[x]` 4. 版本与文档发布
+  - `[x]` 在 [package.json](file:///D:/ai/bs/package.json) 中更新版本号为 `0.3.1`
+  - `[x]` 同步清理 `README.md`、`FUTURE_ROADMAP.md`、`WALKTHROUGH.md` 及 `TASK.md` 中的双分屏相关陈述
+  - `[x]` 使用规范的中文注释执行 Git 提交并推送至远端仓库

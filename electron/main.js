@@ -506,13 +506,8 @@ ipcMain.handle('session:clear-all-data', async () => {
   }
 });
 
-function createTabView(win, tabId, url, isPrivate, side = 'left') {
-  let sess;
-  if (side === 'left') {
-    sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
-  } else {
-    sess = session.fromPartition(isPrivate ? `incognito-split-${tabId}` : `persist:govg-split-${tabId}`);
-  }
+function createTabView(win, tabId, url, isPrivate) {
+  const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
   sess.setUserAgent(STANDARD_UA);
   registerBlockerOnSession(sess);
   registerDownloadOnSession(sess);
@@ -527,44 +522,28 @@ function createTabView(win, tabId, url, isPrivate, side = 'left') {
     }
   });
 
-  let tv = tabViews.get(tabId);
-  if (!tv) {
-    tv = {
-      leftView: null,
-      rightView: null,
-      isPrivate,
-      leftZoomLevel: 0,
-      rightZoomLevel: 0
-    };
-    tabViews.set(tabId, tv);
-  }
-
-  if (side === 'left') {
-    tv.leftView = view;
-  } else {
-    tv.rightView = view;
-  }
+  tabViews.set(tabId, {
+    view,
+    isPrivate,
+    zoomLevel: 0
+  });
 
   const wc = view.webContents;
 
   wc.on('did-start-loading', () => {
-    win.webContents.send('views:event', tabId, 'did-start-loading', { side });
+    win.webContents.send('views:event', tabId, 'did-start-loading');
   });
 
   wc.on('dom-ready', () => {
-    win.webContents.send('views:event', tabId, 'dom-ready', { side });
-    const currentTv = tabViews.get(tabId);
-    if (currentTv) {
-      const zoom = side === 'left' ? currentTv.leftZoomLevel : currentTv.rightZoomLevel;
-      if (zoom !== 0) {
-        wc.setZoomLevel(zoom);
-      }
+    win.webContents.send('views:event', tabId, 'dom-ready');
+    const tv = tabViews.get(tabId);
+    if (tv && tv.zoomLevel !== 0) {
+      wc.setZoomLevel(tv.zoomLevel);
     }
   });
 
   wc.on('did-stop-loading', () => {
     win.webContents.send('views:event', tabId, 'did-stop-loading', {
-      side,
       canGoBack: wc.canGoBack(),
       canGoForward: wc.canGoForward(),
       url: wc.getURL(),
@@ -573,21 +552,20 @@ function createTabView(win, tabId, url, isPrivate, side = 'left') {
   });
 
   wc.on('page-title-updated', (event, title) => {
-    win.webContents.send('views:event', tabId, 'page-title-updated', { side, title });
+    win.webContents.send('views:event', tabId, 'page-title-updated', { title });
   });
 
   wc.on('did-navigate', (event, newUrl) => {
-    win.webContents.send('views:event', tabId, 'did-navigate', { side, url: newUrl });
+    win.webContents.send('views:event', tabId, 'did-navigate', { url: newUrl });
   });
 
   wc.on('did-navigate-in-page', (event, newUrl) => {
-    win.webContents.send('views:event', tabId, 'did-navigate-in-page', { side, url: newUrl });
+    win.webContents.send('views:event', tabId, 'did-navigate-in-page', { url: newUrl });
   });
 
   wc.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return;
     win.webContents.send('views:event', tabId, 'did-fail-load', {
-      side,
       errorCode,
       errorDescription: errorDescription || '页面加载失败',
       validatedURL
@@ -595,7 +573,7 @@ function createTabView(win, tabId, url, isPrivate, side = 'left') {
   });
 
   wc.on('ipc-message', (event, channel, ...args) => {
-    win.webContents.send('views:event', tabId, 'ipc-message', { side, channel, args });
+    win.webContents.send('views:event', tabId, 'ipc-message', { channel, args });
   });
 
   wc.setWindowOpenHandler(({ url }) => {
@@ -650,31 +628,19 @@ function createTabView(win, tabId, url, isPrivate, side = 'left') {
   }
 }
 
-ipcMain.handle('views:create', (event, tabId, url, isPrivate, side = 'left') => {
+ipcMain.handle('views:create', (event, tabId, url, isPrivate) => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) createTabView(win, tabId, url, isPrivate, side);
+  if (win) createTabView(win, tabId, url, isPrivate);
 });
 
-ipcMain.handle('views:destroy', (event, tabId, side = 'left') => {
+ipcMain.handle('views:destroy', (event, tabId) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const tv = tabViews.get(tabId);
   if (tv) {
-    if (side === 'left' && tv.leftView) {
-      try {
-        win.contentView.removeChildView(tv.leftView);
-      } catch {}
-      tv.leftView = null;
-    } else if (side === 'right' && tv.rightView) {
-      try {
-        win.contentView.removeChildView(tv.rightView);
-      } catch {}
-      const splitSess = session.fromPartition(tv.isPrivate ? `incognito-split-${tabId}` : `persist:govg-split-${tabId}`);
-      splitSess.clearStorageData().catch(() => {});
-      tv.rightView = null;
-    }
-    if (!tv.leftView && !tv.rightView) {
-      tabViews.delete(tabId);
-    }
+    try {
+      win.contentView.removeChildView(tv.view);
+    } catch {}
+    tabViews.delete(tabId);
   }
 });
 
@@ -685,8 +651,7 @@ ipcMain.handle('views:select', (event, tabId) => {
   for (const [id, tv] of tabViews.entries()) {
     if (id !== tabId) {
       try {
-        if (tv.leftView) win.contentView.removeChildView(tv.leftView);
-        if (tv.rightView) win.contentView.removeChildView(tv.rightView);
+        win.contentView.removeChildView(tv.view);
       } catch {}
     }
   }
@@ -694,77 +659,56 @@ ipcMain.handle('views:select', (event, tabId) => {
   const activeTv = tabViews.get(tabId);
   if (activeTv) {
     try {
-      if (activeTv.leftView) win.contentView.addChildView(activeTv.leftView);
-      if (activeTv.rightView) win.contentView.addChildView(activeTv.rightView);
+      win.contentView.addChildView(activeTv.view);
     } catch {}
   }
 });
 
-ipcMain.handle('views:set-bounds', (event, tabId, side, bounds) => {
+ipcMain.handle('views:set-bounds', (event, tabId, bounds) => {
   const tv = tabViews.get(tabId);
   if (tv && bounds) {
-    const view = side === 'left' ? tv.leftView : tv.rightView;
-    if (view) {
-      view.setBounds({
-        x: Math.round(bounds.x),
-        y: Math.round(bounds.y),
-        width: Math.round(bounds.width),
-        height: Math.round(bounds.height)
-      });
-    }
+    tv.view.setBounds({
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height)
+    });
   }
 });
 
-ipcMain.handle('views:load-url', (event, tabId, side, url) => {
+ipcMain.handle('views:load-url', (event, tabId, url) => {
   const tv = tabViews.get(tabId);
   if (tv && url && url !== 'swift://newtab') {
-    const view = side === 'left' ? tv.leftView : tv.rightView;
-    if (view) {
-      view.webContents.loadURL(url).catch(() => {});
-    }
+    tv.view.webContents.loadURL(url).catch(() => {});
   }
 });
 
-ipcMain.handle('views:go-back', (event, tabId, side = 'left') => {
+ipcMain.handle('views:go-back', (event, tabId) => {
   const tv = tabViews.get(tabId);
-  if (tv) {
-    const view = side === 'left' ? tv.leftView : tv.rightView;
-    if (view && view.webContents.canGoBack()) {
-      view.webContents.goBack();
-    }
+  if (tv && tv.view.webContents.canGoBack()) {
+    tv.view.webContents.goBack();
   }
 });
 
-ipcMain.handle('views:go-forward', (event, tabId, side = 'left') => {
+ipcMain.handle('views:go-forward', (event, tabId) => {
   const tv = tabViews.get(tabId);
-  if (tv) {
-    const view = side === 'left' ? tv.leftView : tv.rightView;
-    if (view && view.webContents.canGoForward()) {
-      view.webContents.goForward();
-    }
+  if (tv && tv.view.webContents.canGoForward()) {
+    tv.view.webContents.goForward();
   }
 });
 
-ipcMain.handle('views:reload', (event, tabId, side = 'left') => {
+ipcMain.handle('views:reload', (event, tabId) => {
   const tv = tabViews.get(tabId);
   if (tv) {
-    const view = side === 'left' ? tv.leftView : tv.rightView;
-    if (view) {
-      view.webContents.reload();
-    }
+    tv.view.webContents.reload();
   }
 });
 
-ipcMain.handle('views:set-zoom', (event, tabId, side, zoomLevel) => {
+ipcMain.handle('views:set-zoom', (event, tabId, zoomLevel) => {
   const tv = tabViews.get(tabId);
   if (tv) {
-    if (side === 'left') {
-      tv.leftZoomLevel = zoomLevel;
-      if (tv.leftView) tv.leftView.webContents.setZoomLevel(zoomLevel);
-    } else {
-      tv.rightZoomLevel = zoomLevel;
-      if (tv.rightView) tv.rightView.webContents.setZoomLevel(zoomLevel);
-    }
+    tv.zoomLevel = zoomLevel;
+    tv.view.webContents.setZoomLevel(zoomLevel);
   }
 });
 
@@ -790,13 +734,10 @@ ipcMain.handle('session:remove-cookie', async (event, url, name, isPrivate) => {
   }
 });
 
-ipcMain.handle('views:execute-javascript', (event, tabId, side, script) => {
+ipcMain.handle('views:execute-javascript', (event, tabId, script) => {
   const tv = tabViews.get(tabId);
   if (tv) {
-    const view = side === 'left' ? tv.leftView : tv.rightView;
-    if (view) {
-      return view.webContents.executeJavaScript(script).catch(() => {});
-    }
+    return tv.view.webContents.executeJavaScript(script).catch(() => {});
   }
   return false;
 });
