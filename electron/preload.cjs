@@ -16,12 +16,35 @@ contextBridge.exposeInMainWorld('browserAPI', {
   listCredentialsForOrigin: (url) => ipcRenderer.invoke('credentials:list-for-origin', url),
   saveCredential: (credential) => ipcRenderer.invoke('credentials:save', credential),
   removeCredential: (id) => ipcRenderer.invoke('credentials:remove', id),
-  getWebviewPreload: () => ipcRenderer.invoke('app:get-webview-preload'),
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window:maximize-toggle'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
+  toggleFullscreen: () => ipcRenderer.invoke('window:fullscreen-toggle'),
+  listQuickLinks: () => ipcRenderer.invoke('quicklinks:list'),
+  saveQuickLink: (item) => ipcRenderer.invoke('quicklinks:save', item),
+  removeQuickLink: (id) => ipcRenderer.invoke('quicklinks:remove', id),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
+  clearAllData: () => ipcRenderer.invoke('session:clear-all-data'),
+  
+  // WebContentsView APIs
+  createView: (id, url, isPrivate) => ipcRenderer.invoke('views:create', id, url, isPrivate),
+  destroyView: (id) => ipcRenderer.invoke('views:destroy', id),
+  selectView: (id) => ipcRenderer.invoke('views:select', id),
+  setViewBounds: (id, bounds) => ipcRenderer.invoke('views:set-bounds', id, bounds),
+  loadViewUrl: (id, url) => ipcRenderer.invoke('views:load-url', id, url),
+  goBackView: (id) => ipcRenderer.invoke('views:go-back', id),
+  goForwardView: (id) => ipcRenderer.invoke('views:go-forward', id),
+  reloadView: (id) => ipcRenderer.invoke('views:reload', id),
+  setViewZoom: (id, zoomLevel) => ipcRenderer.invoke('views:set-zoom', id, zoomLevel),
+
+  // Cookie APIs
+  getCookies: (domain, isPrivate) => ipcRenderer.invoke('session:get-cookies', domain, isPrivate),
+  removeCookie: (url, name, isPrivate) => ipcRenderer.invoke('session:remove-cookie', url, name, isPrivate),
+  executeViewJavaScript: (id, script) => ipcRenderer.invoke('views:execute-javascript', id, script),
+
   onNewTabRequest: (callback) => {
-    const listener = (_event, url) => callback(url);
+    const listener = (_event, url, isPrivate) => callback(url, isPrivate);
     ipcRenderer.on('browser:new-tab', listener);
     return () => ipcRenderer.removeListener('browser:new-tab', listener);
   },
@@ -29,5 +52,10 @@ contextBridge.exposeInMainWorld('browserAPI', {
     const listener = (_event, downloads) => callback(downloads);
     ipcRenderer.on('downloads:updated', listener);
     return () => ipcRenderer.removeListener('downloads:updated', listener);
+  },
+  onViewsEvent: (callback) => {
+    const listener = (_event, tabId, eventName, details) => callback(tabId, eventName, details);
+    ipcRenderer.on('views:event', listener);
+    return () => ipcRenderer.removeListener('views:event', listener);
   }
 });

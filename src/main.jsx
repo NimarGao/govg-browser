@@ -18,6 +18,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Settings,
   ShieldCheck,
   Square,
   Star,
@@ -29,24 +30,44 @@ import './styles.css';
 const HOME_URL = 'swift://newtab';
 const SEARCH_URL = 'https://www.bing.com/search?q=';
 
+const ZOOM_LEVELS = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8];
+const ZOOM_PERCENTAGES = {
+  '-5': '50%',
+  '-4': '60%',
+  '-3': '70%',
+  '-2': '80%',
+  '-1': '90%',
+  '0': '100%',
+  '1': '110%',
+  '2': '125%',
+  '3': '150%',
+  '4': '175%',
+  '5': '200%',
+  '6': '250%',
+  '7': '300%',
+  '8': '400%'
+};
+
 function isAppHome(url) {
   return url === HOME_URL;
 }
 
-function createTab(url = HOME_URL) {
+function createTab(url = HOME_URL, isPrivate = false) {
   return {
     id: crypto.randomUUID(),
-    title: '新标签页',
+    title: isPrivate ? '无痕新标签页' : '新标签页',
     url,
     input: isAppHome(url) ? '' : url,
     loading: false,
     error: null,
     canGoBack: false,
-    canGoForward: false
+    canGoForward: false,
+    zoomLevel: 0,
+    isPrivate
   };
 }
 
-function toNavigableUrl(value) {
+function toNavigableUrl(value, engine = 'bing') {
   const input = value.trim();
   if (!input) return HOME_URL;
   if (input === HOME_URL) return HOME_URL;
@@ -54,7 +75,13 @@ function toNavigableUrl(value) {
   if (/^[\w.-]+\.[a-z]{2,}(\/.*)?$/i.test(input) || /^localhost(:\d+)?/i.test(input)) {
     return `https://${input}`;
   }
-  return `${SEARCH_URL}${encodeURIComponent(input)}`;
+  const engines = {
+    bing: 'https://www.bing.com/search?q=',
+    baidu: 'https://www.baidu.com/s?wd=',
+    google: 'https://www.google.com/search?q='
+  };
+  const baseUrl = engines[engine] || engines.bing;
+  return `${baseUrl}${encodeURIComponent(input)}`;
 }
 
 function getOriginLabel(url) {
@@ -91,16 +118,7 @@ function getDownloadStateLabel(state) {
   return labels[state] || state || '未知';
 }
 
-function refreshWebviewLayout(element) {
-  if (!element) return;
-  element.style.width = 'calc(100% - 1px)';
-  element.style.height = 'calc(100% - 1px)';
-  window.requestAnimationFrame(() => {
-    element.style.width = '100%';
-    element.style.height = '100%';
-    window.dispatchEvent(new Event('resize'));
-  });
-}
+// refreshWebviewLayout removed because layout bounds are directly handled by WebContentsView bounds sync.
 
 function PasswordPrompt({ credential, onSave, onDismiss }) {
   if (!credential) return null;
@@ -117,14 +135,11 @@ function PasswordPrompt({ credential, onSave, onDismiss }) {
   );
 }
 
-function NewTabPage({ onNavigate }) {
+function NewTabPage({ onNavigate, quickLinks, onAddQuickLink, onRemoveQuickLink }) {
   const [query, setQuery] = useState('');
-  const quickLinks = [
-    { title: 'Bing', url: 'https://www.bing.com' },
-    { title: '百度', url: 'https://www.baidu.com' },
-    { title: 'GitHub', url: 'https://github.com' },
-    { title: '知乎', url: 'https://www.zhihu.com' }
-  ];
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newUrl, setNewUrl] = useState('');
 
   return (
     <div className="new-tab-page">
@@ -143,12 +158,82 @@ function NewTabPage({ onNavigate }) {
       </form>
       <div className="quick-links">
         {quickLinks.map((link) => (
-          <button key={link.url} onClick={() => onNavigate(link.url)}>
-            <span>{link.title.slice(0, 1)}</span>
-            <strong>{link.title}</strong>
-          </button>
+          <div key={link.id || link.url} className="quick-link-tile">
+            <button className="tile-btn" onClick={() => onNavigate(link.url)}>
+              <span className="tile-letter">{link.title.slice(0, 1)}</span>
+              <strong>{link.title}</strong>
+            </button>
+            <button
+              className="tile-remove"
+              title="删除"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRemoveQuickLink(link.id);
+              }}
+            >
+              <X size={13} />
+            </button>
+          </div>
         ))}
+        <button className="quick-link-add-tile" onClick={() => setShowAddModal(true)}>
+          <span className="tile-letter-add">+</span>
+          <strong>添加快捷方式</strong>
+        </button>
       </div>
+
+      {showAddModal && (
+        <div className="quick-link-modal-overlay">
+          <div className="quick-link-modal">
+            <h3>添加快捷方式</h3>
+            <div className="modal-input-group">
+              <label>名称</label>
+              <input
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                placeholder="例如: GitHub"
+                spellCheck="false"
+              />
+            </div>
+            <div className="modal-input-group">
+              <label>网址</label>
+              <input
+                value={newUrl}
+                onChange={(e) => setNewUrl(e.target.value)}
+                placeholder="例如: github.com"
+                spellCheck="false"
+              />
+            </div>
+            <div className="modal-actions">
+              <button className="text-button" onClick={() => {
+                setShowAddModal(false);
+                setNewTitle('');
+                setNewUrl('');
+              }}>
+                取消
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => {
+                  let url = newUrl.trim();
+                  if (!url) return;
+                  if (!/^https?:\/\//i.test(url)) {
+                    url = 'https://' + url;
+                  }
+                  onAddQuickLink({
+                    title: newTitle.trim() || url,
+                    url
+                  });
+                  setNewTitle('');
+                  setNewUrl('');
+                  setShowAddModal(false);
+                }}
+              >
+                添加
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -160,23 +245,50 @@ function App() {
   const [history, setHistory] = useState([]);
   const [downloads, setDownloads] = useState([]);
   const [credentials, setCredentials] = useState([]);
+  const [quickLinks, setQuickLinks] = useState([]);
   const [webviewPreload, setWebviewPreload] = useState('');
   const [showBookmarks, setShowBookmarks] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showDownloads, setShowDownloads] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settings, setSettings] = useState({ defaultSearchEngine: 'bing', startupUrl: 'swift://newtab' });
   const [revealedPasswords, setRevealedPasswords] = useState({});
   const [pendingCredential, setPendingCredential] = useState(null);
-  const webviews = useRef(new Map());
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [bookmarkSearch, setBookmarkSearch] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
+  const [currentCookies, setCurrentCookies] = useState([]);
 
   const resolvedActiveId = activeId || tabs[0]?.id;
   const activeTab = tabs.find((tab) => tab.id === resolvedActiveId) || tabs[0];
+
+  const activeTabRef = useRef(activeTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
+  const resolvedActiveIdRef = useRef(resolvedActiveId);
+  useEffect(() => {
+    resolvedActiveIdRef.current = resolvedActiveId;
+  }, [resolvedActiveId]);
+
+  const settingsRef = useRef(settings);
+  useEffect(() => {
+    settingsRef.current = settings;
+  }, [settings]);
+
+  const createdViewsRef = useRef(new Set());
+  const tabsRef = useRef(tabs);
+  useEffect(() => {
+    tabsRef.current = tabs;
+  }, [tabs]);
 
   const activeBookmarked = useMemo(
     () => bookmarks.some((bookmark) => bookmark.url === activeTab?.url),
     [bookmarks, activeTab?.url]
   );
-  const hasSidePanel = showBookmarks || showHistory || showDownloads || showPasswords;
+  const hasSidePanel = showBookmarks || showHistory || showDownloads || showPasswords || showSettings;
 
   const updateTab = useCallback((id, patch) => {
     setTabs((current) => current.map((tab) => (tab.id === id ? { ...tab, ...patch } : tab)));
@@ -190,9 +302,8 @@ function App() {
     window.browserAPI.listBookmarks().then(setBookmarks);
     window.browserAPI.listHistory().then(setHistory);
     window.browserAPI.listDownloads().then(setDownloads);
-    window.browserAPI.getWebviewPreload().then((filePath) => {
-      setWebviewPreload(`file://${filePath.replaceAll('\\', '/')}`);
-    });
+    window.browserAPI.listQuickLinks().then(setQuickLinks);
+    window.browserAPI.getSettings().then(setSettings);
   }, []);
 
   useEffect(() => {
@@ -201,27 +312,199 @@ function App() {
   }, [activeTab?.url]);
 
   const navigate = useCallback((id, value) => {
-    const url = toNavigableUrl(value);
+    const url = toNavigableUrl(value, settingsRef.current?.defaultSearchEngine || 'bing');
     updateTab(id, { url, input: url, loading: true, error: null });
+    
+    if (createdViewsRef.current.has(id)) {
+      window.browserAPI.loadViewUrl(id, url);
+    }
   }, [updateTab]);
 
-  const addTab = useCallback((url = HOME_URL) => {
-    const tab = createTab(url);
+  const addTab = useCallback((url = null, isPrivate = false) => {
+    const targetUrl = url || settingsRef.current?.startupUrl || HOME_URL;
+    const tab = createTab(targetUrl, isPrivate);
     setTabs((current) => [...current, tab]);
     setActiveId(tab.id);
   }, []);
 
   useEffect(() => {
-    return window.browserAPI.onNewTabRequest((url) => addTab(url));
+    return window.browserAPI.onNewTabRequest((url, isPrivate) => addTab(url, isPrivate));
   }, [addTab]);
 
   useEffect(() => {
     return window.browserAPI.onDownloadsUpdated(setDownloads);
   }, []);
 
+  const handleBrowserShortcut = useCallback((key, ctrlKey) => {
+    if (key === 'F11') {
+      window.browserAPI.toggleFullscreen().then(setIsFullscreen);
+      return;
+    }
+    
+    const currActiveTab = activeTabRef.current;
+    const currActiveId = resolvedActiveIdRef.current;
+    if (!currActiveTab || !currActiveId) return;
+
+    if (ctrlKey && (key === '=' || key === '+')) {
+      const idx = ZOOM_LEVELS.indexOf(currActiveTab.zoomLevel || 0);
+      if (idx < ZOOM_LEVELS.length - 1) {
+        const nextZoom = ZOOM_LEVELS[idx + 1];
+        updateTab(currActiveId, { zoomLevel: nextZoom });
+        window.browserAPI.setViewZoom(currActiveId, nextZoom);
+      }
+    } else if (ctrlKey && key === '-') {
+      const idx = ZOOM_LEVELS.indexOf(currActiveTab.zoomLevel || 0);
+      if (idx > 0) {
+        const nextZoom = ZOOM_LEVELS[idx - 1];
+        updateTab(currActiveId, { zoomLevel: nextZoom });
+        window.browserAPI.setViewZoom(currActiveId, nextZoom);
+      }
+    } else if (ctrlKey && key === '0') {
+      updateTab(currActiveId, { zoomLevel: 0 });
+      window.browserAPI.setViewZoom(currActiveId, 0);
+    }
+  }, [updateTab]);
+
+  const handleBrowserShortcutRef = useRef(handleBrowserShortcut);
   useEffect(() => {
-    refreshWebviewLayout(webviews.current.get(resolvedActiveId));
-  }, [resolvedActiveId, activeTab?.url, showBookmarks, showHistory, showDownloads, showPasswords]);
+    handleBrowserShortcutRef.current = handleBrowserShortcut;
+  }, [handleBrowserShortcut]);
+
+  useEffect(() => {
+    const handleKeyDown = (event) => {
+      const isZoomIn = event.ctrlKey && (event.key === '=' || event.key === '+');
+      const isZoomOut = event.ctrlKey && event.key === '-';
+      const isZoomReset = event.ctrlKey && event.key === '0';
+      const isFullscreen = event.key === 'F11';
+      
+      if (isZoomIn || isZoomOut || isZoomReset || isFullscreen) {
+        event.preventDefault();
+        handleBrowserShortcutRef.current(event.key, event.ctrlKey);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Synchronize tabs with native views
+  useEffect(() => {
+    tabs.forEach((tab) => {
+      if (!isAppHome(tab.url) && !createdViewsRef.current.has(tab.id)) {
+        createdViewsRef.current.add(tab.id);
+        window.browserAPI.createView(tab.id, tab.url, tab.isPrivate);
+      }
+    });
+
+    const currentTabIds = new Set(tabs.map((t) => t.id));
+    for (const tabId of createdViewsRef.current) {
+      if (!currentTabIds.has(tabId)) {
+        createdViewsRef.current.delete(tabId);
+        window.browserAPI.destroyView(tabId);
+      }
+    }
+  }, [tabs]);
+
+  // Handle ResizeObserver and selectView bounds synchronization
+  const stageRef = useRef(null);
+  useEffect(() => {
+    if (!stageRef.current || !activeTab || isAppHome(activeTab.url)) {
+      window.browserAPI.selectView(null);
+      return;
+    }
+
+    const reportBounds = () => {
+      if (!stageRef.current) return;
+      const rect = stageRef.current.getBoundingClientRect();
+      const bounds = {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height
+      };
+      window.browserAPI.setViewBounds(activeTab.id, bounds);
+    };
+
+    window.browserAPI.selectView(activeTab.id);
+    reportBounds();
+
+    const observer = new ResizeObserver(() => {
+      reportBounds();
+    });
+    observer.observe(stageRef.current);
+
+    window.addEventListener('resize', reportBounds);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', reportBounds);
+    };
+  }, [activeTab?.id, activeTab?.url, showBookmarks, showHistory, showDownloads, showPasswords, showSettings]);
+
+  // Listen to native views IPC & lifecycle events
+  useEffect(() => {
+    return window.browserAPI.onViewsEvent(async (tabId, eventName, details) => {
+      if (eventName === 'did-start-loading') {
+        updateTab(tabId, { loading: true });
+      } else if (eventName === 'did-stop-loading') {
+        const { canGoBack, canGoForward, url, title } = details;
+        updateTab(tabId, {
+          loading: false,
+          canGoBack,
+          canGoForward,
+          url,
+          input: url,
+          title: title || '未命名页面'
+        });
+        
+        const currTabs = tabsRef.current;
+        const tab = currTabs.find(t => t.id === tabId);
+        if (tab && !tab.isPrivate && url) {
+          setHistory(await window.browserAPI.addHistory({ title, url }));
+        }
+
+        if (tabId === resolvedActiveIdRef.current && url) {
+          setCredentials(await window.browserAPI.listCredentialsForOrigin(url));
+        }
+      } else if (eventName === 'page-title-updated') {
+        updateTab(tabId, { title: details.title || '未命名页面' });
+      } else if (eventName === 'did-navigate') {
+        updateTab(tabId, { url: details.url, input: details.url });
+      } else if (eventName === 'did-navigate-in-page') {
+        updateTab(tabId, { url: details.url, input: details.url });
+      } else if (eventName === 'did-fail-load') {
+        updateTab(tabId, {
+          loading: false,
+          error: {
+            code: details.errorCode,
+            description: details.errorDescription || '页面加载失败',
+            url: details.validatedURL
+          }
+        });
+      } else if (eventName === 'ipc-message') {
+        const { channel, args } = details;
+        if (channel === 'credential-captured') {
+          const currTabs = tabsRef.current;
+          const tab = currTabs.find(t => t.id === tabId);
+          if (tab && tab.isPrivate) return;
+          const credential = args?.[0];
+          if (credential?.username && credential?.password) setPendingCredential(credential);
+        } else if (channel === 'webview-keydown') {
+          const { key, ctrlKey } = args?.[0] || {};
+          handleBrowserShortcutRef.current(key, ctrlKey);
+        }
+      }
+    });
+  }, [updateTab]);
+
+  // Fetch cookies for the active domain when Settings is open
+  useEffect(() => {
+    if (!showSettings || !activeTab || isAppHome(activeTab.url)) {
+      setCurrentCookies([]);
+      return;
+    }
+    const host = getOriginLabel(activeTab.url);
+    window.browserAPI.getCookies(host, activeTab.isPrivate).then(setCurrentCookies);
+  }, [showSettings, activeTab?.url, activeTab?.isPrivate]);
 
   const closeTab = useCallback((id) => {
     setTabs((current) => {
@@ -258,8 +541,6 @@ function App() {
   }, [activeTab?.url]);
 
   const autofill = useCallback((credential) => {
-    const webview = webviews.current.get(activeTab.id);
-    if (!webview) return;
     const script = `
       (() => {
         const username = ${JSON.stringify(credential.username)};
@@ -284,74 +565,27 @@ function App() {
         return true;
       })();
     `;
-    webview.executeJavaScript(script).catch(() => {});
+    window.browserAPI.executeViewJavaScript(activeTab.id, script);
   }, [activeTab?.id]);
 
-  const attachWebview = useCallback((tab, element) => {
-    if (!element || webviews.current.get(tab.id) === element) return;
-    webviews.current.set(tab.id, element);
-    [0, 120, 500, 1000].forEach((delay) => {
-      window.setTimeout(() => refreshWebviewLayout(element), delay);
-    });
-
-    element.addEventListener('did-start-loading', () => updateTab(tab.id, { loading: true }));
-    element.addEventListener('dom-ready', () => {
-      refreshWebviewLayout(element);
-    });
-    element.addEventListener('did-stop-loading', async () => {
-      refreshWebviewLayout(element);
-      updateTab(tab.id, {
-        loading: false,
-        canGoBack: element.canGoBack(),
-        canGoForward: element.canGoForward()
-      });
-      const currentUrl = element.getURL();
-      if (currentUrl) {
-        updateTab(tab.id, { url: currentUrl, input: currentUrl });
-        const title = element.getTitle?.() || currentUrl;
-        setHistory(await window.browserAPI.addHistory({ title, url: currentUrl }));
-        if (tab.id === resolvedActiveId) {
-          setCredentials(await window.browserAPI.listCredentialsForOrigin(currentUrl));
-        }
-      }
-    });
-    element.addEventListener('page-title-updated', (event) => updateTab(tab.id, { title: event.title || '未命名页面' }));
-    element.addEventListener('did-navigate', (event) => updateTab(tab.id, { url: event.url, input: event.url }));
-    element.addEventListener('did-navigate-in-page', (event) => updateTab(tab.id, { url: event.url, input: event.url }));
-    element.addEventListener('did-fail-load', (event) => {
-      if (!event.isMainFrame || event.errorCode === -3) return;
-      updateTab(tab.id, {
-        loading: false,
-        error: {
-          code: event.errorCode,
-          description: event.errorDescription || '页面加载失败',
-          url: event.validatedURL || tab.url
-        }
-      });
-    });
-    element.addEventListener('ipc-message', (event) => {
-      if (event.channel !== 'credential-captured') return;
-      const credential = event.args?.[0];
-      if (credential?.username && credential?.password) setPendingCredential(credential);
-    });
-    element.addEventListener('new-window', (event) => {
-      event.preventDefault();
-      if (event.url) addTab(event.url);
-    });
-  }, [addTab, resolvedActiveId, updateTab]);
+  // WebContentsView does not require direct mounting/attachment callbacks in DOM.
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${isFullscreen ? 'fullscreen' : ''} ${activeTab?.isPrivate ? 'private-mode' : ''}`}>
       <section className="tab-strip">
         <div className="tabs-area">
           {tabs.map((tab) => (
             <button
               key={tab.id}
-              className={`tab ${tab.id === resolvedActiveId ? 'active' : ''}`}
+              className={`tab ${tab.id === resolvedActiveId ? 'active' : ''} ${tab.isPrivate ? 'private' : ''}`}
               onClick={() => setActiveId(tab.id)}
               title={tab.title}
             >
-              <span className="tab-title">{tab.loading ? <Loader2 className="spin" size={14} /> : null}{tab.title}</span>
+              <span className="tab-title">
+                {tab.loading ? <Loader2 className="spin" size={14} /> : null}
+                {tab.isPrivate ? <EyeOff size={13} className="private-tab-icon" /> : null}
+                {tab.title}
+              </span>
               <span
                 className="tab-close"
                 role="button"
@@ -368,6 +602,9 @@ function App() {
           <button className="icon-button" title="新建标签页" onClick={() => addTab()}>
             <Plus size={18} />
           </button>
+          <button className="icon-button private-tab-btn" title="新建无痕标签页" onClick={() => addTab(null, true)}>
+            <EyeOff size={15} />
+          </button>
         </div>
         <div className="window-controls">
           <button className="window-button" title="最小化" onClick={() => window.browserAPI.minimizeWindow()}>
@@ -383,16 +620,16 @@ function App() {
       </section>
 
       <section className="toolbar">
-        <button className="icon-button" title="后退" disabled={!activeTab?.canGoBack} onClick={() => webviews.current.get(activeTab.id)?.goBack()}>
+        <button className="icon-button" title="后退" disabled={!activeTab?.canGoBack} onClick={() => window.browserAPI.goBackView(activeTab.id)}>
           <ArrowLeft size={18} />
         </button>
-        <button className="icon-button" title="前进" disabled={!activeTab?.canGoForward} onClick={() => webviews.current.get(activeTab.id)?.goForward()}>
+        <button className="icon-button" title="前进" disabled={!activeTab?.canGoForward} onClick={() => window.browserAPI.goForwardView(activeTab.id)}>
           <ArrowRight size={18} />
         </button>
-        <button className="icon-button" title="刷新" onClick={() => webviews.current.get(activeTab.id)?.reload()}>
+        <button className="icon-button" title="刷新" onClick={() => window.browserAPI.reloadView(activeTab.id)}>
           <RefreshCw size={18} />
         </button>
-        <button className="icon-button" title="主页" onClick={() => navigate(activeTab.id, HOME_URL)}>
+        <button className="icon-button" title="主页" onClick={() => navigate(activeTab.id, settings.startupUrl || HOME_URL)}>
           <Home size={18} />
         </button>
 
@@ -407,23 +644,69 @@ function App() {
             placeholder="搜索或输入网址"
             spellCheck="false"
           />
+          {activeTab && activeTab.zoomLevel !== 0 && (
+            <button
+              type="button"
+              className="zoom-badge"
+              title="重置缩放"
+              onClick={() => {
+                updateTab(activeTab.id, { zoomLevel: 0 });
+                window.browserAPI.setViewZoom(activeTab.id, 0);
+              }}
+            >
+              {ZOOM_PERCENTAGES[activeTab.zoomLevel] || '100%'}
+            </button>
+          )}
           <ShieldCheck size={17} className="secure-icon" />
         </form>
 
         <button className={`icon-button ${activeBookmarked ? 'marked' : ''}`} title="收藏当前页面" onClick={toggleBookmark}>
           {activeBookmarked ? <Star size={18} /> : <BookmarkPlus size={18} />}
         </button>
-        <button className={`icon-button ${showBookmarks ? 'active' : ''}`} title="收藏夹" onClick={() => setShowBookmarks((value) => !value)}>
+        <button className={`icon-button ${showBookmarks ? 'active' : ''}`} title="收藏夹" onClick={() => {
+          setShowBookmarks((value) => !value);
+          setShowHistory(false);
+          setShowDownloads(false);
+          setShowPasswords(false);
+          setShowSettings(false);
+        }}>
           <Bookmark size={18} />
         </button>
-        <button className={`icon-button ${showHistory ? 'active' : ''}`} title="历史记录" onClick={() => setShowHistory((value) => !value)}>
+        <button className={`icon-button ${showHistory ? 'active' : ''}`} title="历史记录" onClick={() => {
+          setShowHistory((value) => !value);
+          setShowBookmarks(false);
+          setShowDownloads(false);
+          setShowPasswords(false);
+          setShowSettings(false);
+        }}>
           <Clock3 size={18} />
         </button>
-        <button className={`icon-button ${showDownloads ? 'active' : ''}`} title="下载管理" onClick={() => setShowDownloads((value) => !value)}>
+        <button className={`icon-button ${showDownloads ? 'active' : ''}`} title="下载管理" onClick={() => {
+          setShowDownloads((value) => !value);
+          setShowBookmarks(false);
+          setShowHistory(false);
+          setShowPasswords(false);
+          setShowSettings(false);
+        }}>
           <Download size={18} />
         </button>
-        <button className={`icon-button ${showPasswords ? 'active' : ''}`} title="账号密码" onClick={() => setShowPasswords((value) => !value)}>
+        <button className={`icon-button ${showPasswords ? 'active' : ''}`} title="账号密码" onClick={() => {
+          setShowPasswords((value) => !value);
+          setShowBookmarks(false);
+          setShowHistory(false);
+          setShowDownloads(false);
+          setShowSettings(false);
+        }}>
           <KeyRound size={18} />
+        </button>
+        <button className={`icon-button ${showSettings ? 'active' : ''}`} title="设置" onClick={() => {
+          setShowSettings((value) => !value);
+          setShowBookmarks(false);
+          setShowHistory(false);
+          setShowDownloads(false);
+          setShowPasswords(false);
+        }}>
+          <Settings size={18} />
         </button>
       </section>
 
@@ -433,17 +716,41 @@ function App() {
             {showBookmarks && (
               <div className="panel-section">
                 <h2>收藏夹</h2>
-                {bookmarks.length === 0 ? <p className="empty">暂无收藏</p> : bookmarks.map((bookmark) => (
-                  <div className="list-row" key={bookmark.id}>
-                    <button className="row-main" onClick={() => navigate(activeTab.id, bookmark.url)}>
-                      <strong>{bookmark.title}</strong>
-                      <span>{getOriginLabel(bookmark.url)}</span>
+                <div className="panel-search">
+                  <Search size={14} />
+                  <input
+                    value={bookmarkSearch}
+                    onChange={(e) => setBookmarkSearch(e.target.value)}
+                    placeholder="搜索书签..."
+                    spellCheck="false"
+                  />
+                  {bookmarkSearch && (
+                    <button className="clear-search" onClick={() => setBookmarkSearch('')}>
+                      <X size={14} />
                     </button>
-                    <button className="icon-button small" title="删除" onClick={() => window.browserAPI.removeBookmark(bookmark.id).then(setBookmarks)}>
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                ))}
+                  )}
+                </div>
+                {bookmarks.filter(item => 
+                  (item.title || '').toLowerCase().includes(bookmarkSearch.toLowerCase()) || 
+                  (item.url || '').toLowerCase().includes(bookmarkSearch.toLowerCase())
+                ).length === 0 ? (
+                  <p className="empty">{bookmarks.length === 0 ? '暂无收藏' : '没有匹配的书签'}</p>
+                ) : (
+                  bookmarks.filter(item => 
+                    (item.title || '').toLowerCase().includes(bookmarkSearch.toLowerCase()) || 
+                    (item.url || '').toLowerCase().includes(bookmarkSearch.toLowerCase())
+                  ).map((bookmark) => (
+                    <div className="list-row" key={bookmark.id}>
+                      <button className="row-main" onClick={() => navigate(activeTab.id, bookmark.url)}>
+                        <strong>{bookmark.title}</strong>
+                        <span>{getOriginLabel(bookmark.url)}</span>
+                      </button>
+                      <button className="icon-button small" title="删除" onClick={() => window.browserAPI.removeBookmark(bookmark.id).then(setBookmarks)}>
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             )}
 
@@ -457,17 +764,41 @@ function App() {
                     </button>
                   )}
                 </div>
-                {history.length === 0 ? <p className="empty">暂无历史记录</p> : history.map((item) => (
-                  <div className="list-row" key={item.id}>
-                    <button className="row-main" onClick={() => navigate(activeTab.id, item.url)}>
-                      <strong>{item.title}</strong>
-                      <span>{formatVisitedAt(item.visitedAt)} · {getOriginLabel(item.url)}</span>
+                <div className="panel-search">
+                  <Search size={14} />
+                  <input
+                    value={historySearch}
+                    onChange={(e) => setHistorySearch(e.target.value)}
+                    placeholder="搜索历史记录..."
+                    spellCheck="false"
+                  />
+                  {historySearch && (
+                    <button className="clear-search" onClick={() => setHistorySearch('')}>
+                      <X size={14} />
                     </button>
-                    <button className="icon-button small" title="删除" onClick={() => window.browserAPI.removeHistory(item.id).then(setHistory)}>
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                ))}
+                  )}
+                </div>
+                {history.filter(item => 
+                  (item.title || '').toLowerCase().includes(historySearch.toLowerCase()) || 
+                  (item.url || '').toLowerCase().includes(historySearch.toLowerCase())
+                ).length === 0 ? (
+                  <p className="empty">{history.length === 0 ? '暂无历史记录' : '没有匹配的历史记录'}</p>
+                ) : (
+                  history.filter(item => 
+                    (item.title || '').toLowerCase().includes(historySearch.toLowerCase()) || 
+                    (item.url || '').toLowerCase().includes(historySearch.toLowerCase())
+                  ).map((item) => (
+                    <div className="list-row" key={item.id}>
+                      <button className="row-main" onClick={() => navigate(activeTab.id, item.url)}>
+                        <strong>{item.title}</strong>
+                        <span>{formatVisitedAt(item.visitedAt)} · {getOriginLabel(item.url)}</span>
+                      </button>
+                      <button className="icon-button small" title="删除" onClick={() => window.browserAPI.removeHistory(item.id).then(setHistory)}>
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))
+                )}
               </div>
             )}
 
@@ -527,22 +858,121 @@ function App() {
                 ))}
               </div>
             )}
+
+            {showSettings && (
+              <div className="panel-section">
+                <h2>系统设置</h2>
+                
+                <div className="settings-group">
+                  <label className="settings-label">默认搜索引擎</label>
+                  <select
+                    className="settings-select"
+                    value={settings.defaultSearchEngine || 'bing'}
+                    onChange={async (e) => {
+                      const next = await window.browserAPI.setSettings({ defaultSearchEngine: e.target.value });
+                      setSettings(next);
+                    }}
+                  >
+                    <option value="bing">Bing 搜索</option>
+                    <option value="baidu">百度搜索</option>
+                    <option value="google">Google 搜索</option>
+                  </select>
+                </div>
+
+                <div className="settings-group">
+                  <label className="settings-label">主页地址 / 启动页</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={settings.startupUrl || ''}
+                    onChange={async (e) => {
+                      const next = await window.browserAPI.setSettings({ startupUrl: e.target.value });
+                      setSettings(next);
+                    }}
+                    placeholder="例如: swift://newtab"
+                    spellCheck="false"
+                  />
+                </div>
+
+                <div className="settings-group cookies-sec">
+                  <label className="settings-label">当前网站 Cookies ({currentCookies.length} 个)</label>
+                  <div className="cookies-list">
+                    {currentCookies.length === 0 ? (
+                      <p className="empty">暂无 Cookie 数据</p>
+                    ) : (
+                      currentCookies.map((cookie) => (
+                        <div key={cookie.name} className="cookie-row">
+                          <div className="cookie-info">
+                            <strong>{cookie.name}</strong>
+                            <span>{cookie.value.slice(0, 15)}{cookie.value.length > 15 ? '...' : ''}</span>
+                          </div>
+                          <button
+                            type="button"
+                            className="cookie-remove"
+                            title="删除"
+                            onClick={async () => {
+                              const url = `https://${cookie.domain.replace(/^\./, '')}${cookie.path}`;
+                              const success = await window.browserAPI.removeCookie(url, cookie.name, activeTab.isPrivate);
+                              if (success) {
+                                const host = getOriginLabel(activeTab.url);
+                                window.browserAPI.getCookies(host, activeTab.isPrivate).then(setCurrentCookies);
+                              }
+                            }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="settings-group clear-data-sec">
+                  <label className="settings-label">隐私清理</label>
+                  <button
+                    className="danger-button"
+                    onClick={async () => {
+                      if (confirm('确定要清除所有的浏览器缓存、Cookie、历史记录和下载记录吗？此操作不可逆。')) {
+                        const success = await window.browserAPI.clearAllData();
+                        if (success) {
+                          setHistory([]);
+                          setDownloads([]);
+                          alert('数据已成功清除，普通网站的会话已退出。');
+                        } else {
+                          alert('数据清除失败，请重试。');
+                        }
+                      }
+                    }}
+                  >
+                    清除所有浏览器数据
+                  </button>
+                </div>
+              </div>
+            )}
           </aside>
         )}
 
         <section className="webview-stage">
-          {webviewPreload && activeTab && !isAppHome(activeTab.url) && (
-            <webview
-              key={activeTab.id}
-              ref={(element) => attachWebview(activeTab, element)}
-              className="browser-webview visible"
-              src={activeTab.url}
-              preload={webviewPreload}
-              allowpopups="true"
-              partition="persist:govg-browser"
+          {activeTab && !isAppHome(activeTab.url) && (
+            <div
+              className="webview-stage-placeholder visible"
+              ref={stageRef}
             />
           )}
-          {isAppHome(activeTab?.url) && <NewTabPage onNavigate={(value) => navigate(activeTab.id, value)} />}
+          {isAppHome(activeTab?.url) && (
+            <NewTabPage
+              quickLinks={quickLinks}
+              onNavigate={(value) => navigate(activeTab.id, value)}
+              onAddQuickLink={async (item) => {
+                const next = await window.browserAPI.saveQuickLink(item);
+                setQuickLinks(next);
+              }}
+              onRemoveQuickLink={async (id) => {
+                const next = await window.browserAPI.removeQuickLink(id);
+                setQuickLinks(next);
+              }}
+            />
+          )}
           {activeTab?.error && (
             <div className="page-error">
               <strong>无法打开网页</strong>

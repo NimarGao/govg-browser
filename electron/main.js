@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, safeStorage, session, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, safeStorage, session, shell, WebContentsView } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Store from 'electron-store';
@@ -12,24 +12,56 @@ const store = new Store({
     bookmarks: [],
     credentials: [],
     history: [],
-    downloads: []
+    downloads: [],
+    quickLinks: [
+      { id: '1', title: 'Bing', url: 'https://www.bing.com' },
+      { id: '2', title: '百度', url: 'https://www.baidu.com' },
+      { id: '3', title: 'GitHub', url: 'https://github.com' },
+      { id: '4', title: '知乎', url: 'https://www.zhihu.com' }
+    ],
+    settings: {
+      defaultSearchEngine: 'bing',
+      startupUrl: 'swift://newtab'
+    }
   }
 });
 
 const downloadItems = new Map();
+const tabViews = new Map();
 
-const AD_HOST_PATTERNS = [
+const DEFAULT_BLOCKED_DOMAINS = [
   'doubleclick.net',
   'googlesyndication.com',
   'googleadservices.com',
-  'adservice.google.',
+  'adservice.google.com',
+  'adservice.google.cn',
   'adsystem.com',
   'adnxs.com',
   'taboola.com',
   'outbrain.com',
   'scorecardresearch.com',
-  'zedo.com'
+  'zedo.com',
+  'adcolony.com',
+  'admob.com',
+  'applovin.com',
+  'flurry.com',
+  'inmobi.com',
+  'pubmatic.com',
+  'rubiconproject.com',
+  'criteo.com',
+  'openx.net',
+  'amazon-adsystem.com',
+  'adroll.com',
+  'quantserve.com',
+  'hotjar.com',
+  'mixpanel.com',
+  'amplitude.com',
+  'adform.net',
+  'optimizely.com',
+  'adtech.de',
+  'serving-sys.com'
 ];
+const blockedHosts = new Set(DEFAULT_BLOCKED_DOMAINS);
 
 function encryptText(value) {
   const text = String(value ?? '');
@@ -73,7 +105,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      webviewTag: true
+      webviewTag: false
     }
   });
 
@@ -99,10 +131,13 @@ function createWindow() {
 
 function installNewTabHandler() {
   app.on('web-contents-created', (_event, contents) => {
+    registerBlockerOnSession(contents.session);
+    registerDownloadOnSession(contents.session);
+
     contents.setWindowOpenHandler(({ url }) => {
       const owner = BrowserWindow.getAllWindows()[0];
       if (owner && (url.startsWith('http://') || url.startsWith('https://'))) {
-        owner.webContents.send('browser:new-tab', url);
+        owner.webContents.send('browser:new-tab', url, contents.isOffTheRecord());
         return { action: 'deny' };
       }
       shell.openExternal(url);
@@ -162,8 +197,11 @@ function saveDownloadRecord(record) {
   return next;
 }
 
-function installDownloadManager() {
-  session.defaultSession.on('will-download', (_event, item) => {
+function registerDownloadOnSession(sess) {
+  if (registeredDownloadSessions.has(sess)) return;
+  registeredDownloadSessions.add(sess);
+
+  sess.on('will-download', (_event, item) => {
     const id = crypto.randomUUID();
     const record = {
       id,
@@ -213,13 +251,41 @@ function installDownloadManager() {
   });
 }
 
-function installRequestBlocker() {
+const registeredDownloadSessions = new WeakSet();
+
+function installDownloadManager() {
+  registerDownloadOnSession(session.defaultSession);
+}
+
+const registeredSessions = new WeakSet();
+function registerBlockerOnSession(sess) {
+  if (registeredSessions.has(sess)) return;
+  registeredSessions.add(sess);
+
   const filter = { urls: ['*://*/*'] };
-  session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
-    const url = details.url.toLowerCase();
-    const isAd = AD_HOST_PATTERNS.some((pattern) => url.includes(pattern));
-    callback({ cancel: isAd });
+  sess.webRequest.onBeforeRequest(filter, (details, callback) => {
+    try {
+      const url = new URL(details.url);
+      const hostname = url.hostname.toLowerCase();
+      let isAd = false;
+      let parts = hostname.split('.');
+      while (parts.length >= 2) {
+        const domain = parts.join('.');
+        if (blockedHosts.has(domain)) {
+          isAd = true;
+          break;
+        }
+        parts.shift();
+      }
+      callback({ cancel: isAd });
+    } catch {
+      callback({ cancel: false });
+    }
   });
+}
+
+function installRequestBlocker() {
+  registerBlockerOnSession(session.defaultSession);
 }
 
 app.whenReady().then(() => {
@@ -377,4 +443,295 @@ ipcMain.handle('window:maximize-toggle', (event) => {
 
 ipcMain.handle('window:close', (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
+});
+
+ipcMain.handle('window:fullscreen-toggle', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return false;
+  const next = !window.isFullScreen();
+  window.setFullScreen(next);
+  return next;
+});
+
+ipcMain.handle('quicklinks:list', () => store.get('quickLinks', []));
+
+ipcMain.handle('quicklinks:save', (_event, item) => {
+  const list = store.get('quickLinks', []);
+  const clean = {
+    id: item.id || crypto.randomUUID(),
+    title: String(item.title || item.url || '未命名').slice(0, 100),
+    url: String(item.url || '')
+  };
+  if (!clean.url.startsWith('http://') && !clean.url.startsWith('https://')) return list;
+  const next = [...list.filter((i) => i.url !== clean.url), clean];
+  store.set('quickLinks', next);
+  return next;
+});
+
+ipcMain.handle('quicklinks:remove', (_event, id) => {
+  const next = store.get('quickLinks', []).filter((i) => i.id !== id);
+  store.set('quickLinks', next);
+  return next;
+});
+
+ipcMain.handle('settings:get', () => store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab' }));
+
+ipcMain.handle('settings:set', (_event, patch) => {
+  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab' });
+  const next = { ...current, ...patch };
+  store.set('settings', next);
+  return next;
+});
+
+ipcMain.handle('session:clear-all-data', async () => {
+  try {
+    const normalSess = session.fromPartition('persist:govg-browser');
+    await normalSess.clearStorageData({
+      storages: ['cookies', 'localstorage', 'cache', 'indexdb', 'websql', 'serviceworkers']
+    });
+    await session.defaultSession.clearStorageData({
+      storages: ['cookies', 'localstorage', 'cache', 'indexdb', 'websql', 'serviceworkers']
+    });
+    store.set('history', []);
+    store.set('downloads', []);
+    return true;
+  } catch (err) {
+    console.error('Clear storage error:', err);
+    return false;
+  }
+});
+
+function createTabView(win, tabId, url, isPrivate) {
+  const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
+  registerBlockerOnSession(sess);
+  registerDownloadOnSession(sess);
+
+  const view = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'webview-preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+      session: sess
+    }
+  });
+
+  tabViews.set(tabId, {
+    view,
+    isPrivate,
+    zoomLevel: 0
+  });
+
+  const wc = view.webContents;
+
+  wc.on('did-start-loading', () => {
+    win.webContents.send('views:event', tabId, 'did-start-loading');
+  });
+
+  wc.on('dom-ready', () => {
+    win.webContents.send('views:event', tabId, 'dom-ready');
+    const tv = tabViews.get(tabId);
+    if (tv && tv.zoomLevel !== 0) {
+      wc.setZoomLevel(tv.zoomLevel);
+    }
+  });
+
+  wc.on('did-stop-loading', () => {
+    win.webContents.send('views:event', tabId, 'did-stop-loading', {
+      canGoBack: wc.canGoBack(),
+      canGoForward: wc.canGoForward(),
+      url: wc.getURL(),
+      title: wc.getTitle() || wc.getURL()
+    });
+  });
+
+  wc.on('page-title-updated', (event, title) => {
+    win.webContents.send('views:event', tabId, 'page-title-updated', { title });
+  });
+
+  wc.on('did-navigate', (event, newUrl) => {
+    win.webContents.send('views:event', tabId, 'did-navigate', { url: newUrl });
+  });
+
+  wc.on('did-navigate-in-page', (event, newUrl) => {
+    win.webContents.send('views:event', tabId, 'did-navigate-in-page', { url: newUrl });
+  });
+
+  wc.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return;
+    win.webContents.send('views:event', tabId, 'did-fail-load', {
+      errorCode,
+      errorDescription: errorDescription || '页面加载失败',
+      validatedURL
+    });
+  });
+
+  wc.on('ipc-message', (event, channel, ...args) => {
+    win.webContents.send('views:event', tabId, 'ipc-message', { channel, args });
+  });
+
+  wc.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      win.webContents.send('browser:new-tab', url, isPrivate);
+      return { action: 'deny' };
+    }
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  wc.on('context-menu', (event, params) => {
+    const menu = Menu.buildFromTemplate([
+      {
+        label: '后退',
+        enabled: wc.canGoBack(),
+        click: () => wc.goBack()
+      },
+      {
+        label: '前进',
+        enabled: wc.canGoForward(),
+        click: () => wc.goForward()
+      },
+      {
+        label: '刷新',
+        click: () => wc.reload()
+      },
+      { type: 'separator' },
+      {
+        label: '复制',
+        role: 'copy',
+        enabled: params.selectionText.length > 0
+      },
+      {
+        label: '全选',
+        role: 'selectAll'
+      },
+      { type: 'separator' },
+      {
+        label: '审查元素',
+        click: () => {
+          wc.inspectElement(params.x, params.y);
+          if (wc.isDevToolsOpened()) wc.devToolsWebContents?.focus();
+        }
+      }
+    ]);
+    menu.popup();
+  });
+
+  if (url && url !== 'swift://newtab') {
+    wc.loadURL(url).catch(() => {});
+  }
+}
+
+ipcMain.handle('views:create', (event, tabId, url, isPrivate) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (win) createTabView(win, tabId, url, isPrivate);
+});
+
+ipcMain.handle('views:destroy', (event, tabId) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const tv = tabViews.get(tabId);
+  if (tv) {
+    try {
+      win.contentView.removeChildView(tv.view);
+    } catch {}
+    tabViews.delete(tabId);
+  }
+});
+
+ipcMain.handle('views:select', (event, tabId) => {
+  const win = BrowserWindow.fromWebContents(event.sender);
+  if (!win) return;
+
+  for (const [id, tv] of tabViews.entries()) {
+    if (id !== tabId) {
+      try {
+        win.contentView.removeChildView(tv.view);
+      } catch {}
+    }
+  }
+
+  const activeTv = tabViews.get(tabId);
+  if (activeTv) {
+    try {
+      win.contentView.addChildView(activeTv.view);
+    } catch {}
+  }
+});
+
+ipcMain.handle('views:set-bounds', (event, tabId, bounds) => {
+  const tv = tabViews.get(tabId);
+  if (tv && bounds) {
+    tv.view.setBounds({
+      x: Math.round(bounds.x),
+      y: Math.round(bounds.y),
+      width: Math.round(bounds.width),
+      height: Math.round(bounds.height)
+    });
+  }
+});
+
+ipcMain.handle('views:load-url', (event, tabId, url) => {
+  const tv = tabViews.get(tabId);
+  if (tv && url && url !== 'swift://newtab') {
+    tv.view.webContents.loadURL(url).catch(() => {});
+  }
+});
+
+ipcMain.handle('views:go-back', (event, tabId) => {
+  const tv = tabViews.get(tabId);
+  if (tv && tv.view.webContents.canGoBack()) {
+    tv.view.webContents.goBack();
+  }
+});
+
+ipcMain.handle('views:go-forward', (event, tabId) => {
+  const tv = tabViews.get(tabId);
+  if (tv && tv.view.webContents.canGoForward()) {
+    tv.view.webContents.goForward();
+  }
+});
+
+ipcMain.handle('views:reload', (event, tabId) => {
+  const tv = tabViews.get(tabId);
+  if (tv) {
+    tv.view.webContents.reload();
+  }
+});
+
+ipcMain.handle('views:set-zoom', (event, tabId, zoomLevel) => {
+  const tv = tabViews.get(tabId);
+  if (tv) {
+    tv.zoomLevel = zoomLevel;
+    tv.view.webContents.setZoomLevel(zoomLevel);
+  }
+});
+
+ipcMain.handle('session:get-cookies', async (event, domain, isPrivate) => {
+  try {
+    const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
+    const cookies = await sess.cookies.get({ domain });
+    return cookies;
+  } catch (err) {
+    console.error('Get cookies error:', err);
+    return [];
+  }
+});
+
+ipcMain.handle('session:remove-cookie', async (event, url, name, isPrivate) => {
+  try {
+    const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
+    await sess.cookies.remove(url, name);
+    return true;
+  } catch (err) {
+    console.error('Remove cookie error:', err);
+    return false;
+  }
+});
+
+ipcMain.handle('views:execute-javascript', (event, tabId, script) => {
+  const tv = tabViews.get(tabId);
+  if (tv) {
+    return tv.view.webContents.executeJavaScript(script).catch(() => {});
+  }
+  return false;
 });

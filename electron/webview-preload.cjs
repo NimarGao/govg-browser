@@ -49,3 +49,18 @@ window.addEventListener('click', (event) => {
   const form = button.form || button.closest('form');
   if (form) setTimeout(() => captureForm(form), 0);
 }, true);
+
+window.addEventListener('keydown', (event) => {
+  const isZoomIn = event.ctrlKey && (event.key === '=' || event.key === '+');
+  const isZoomOut = event.ctrlKey && event.key === '-';
+  const isZoomReset = event.ctrlKey && event.key === '0';
+  const isFullscreen = event.key === 'F11';
+
+  if (isZoomIn || isZoomOut || isZoomReset || isFullscreen) {
+    event.preventDefault();
+    ipcRenderer.sendToHost('webview-keydown', {
+      key: event.key,
+      ctrlKey: event.ctrlKey
+    });
+  }
+}, true);
