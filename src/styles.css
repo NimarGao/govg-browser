@@ -1134,4 +1134,143 @@ button {
   border-top-color: #3b2e4f;
 }
 
+/* macOS 风格交通灯窗口控制按钮 */
+.window-controls.macos-style {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+  padding: 0 16px;
+  align-self: center;
+  -webkit-app-region: no-drag;
+}
+
+.window-controls.macos-style .mac-btn {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.15s ease;
+}
+
+.window-controls.macos-style .mac-btn.close {
+  background-color: #ff5f56;
+}
+.window-controls.macos-style .mac-btn.minimize {
+  background-color: #ffbd2e;
+}
+.window-controls.macos-style .mac-btn.maximize {
+  background-color: #27c93f;
+}
+
+/* Hover 时圆点内部显示精致的 mac 图标符号 */
+.window-controls.macos-style:hover .mac-btn::before {
+  content: "";
+  position: absolute;
+  color: rgba(0, 0, 0, 0.55);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.8;
+}
+
+.window-controls.macos-style:hover .mac-btn.close::before {
+  content: "×";
+  top: 0px;
+}
+.window-controls.macos-style:hover .mac-btn.minimize::before {
+  content: "─";
+  font-size: 7px;
+  top: 1.5px;
+}
+.window-controls.macos-style:hover .mac-btn.maximize::before {
+  content: "+";
+  font-size: 8px;
+  top: 1px;
+}
+
+/* 按下效果 */
+.window-controls.macos-style .mac-btn:active {
+  filter: brightness(0.8);
+}
+
+/* 双分屏布局样式 */
+.webview-stage.split-mode {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1px;
+  background: #cbd3dc; /* 分割线颜色 */
+  width: 100%;
+  height: 100%;
+}
+
+.private-mode .webview-stage.split-mode {
+  background: #2e2240;
+}
+
+.split-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: #ffffff;
+  position: relative;
+}
+
+.private-mode .split-pane {
+  background: #09070d;
+}
+
+/* 右分屏专属工具栏 */
+.split-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: #f1f5f9;
+  border-bottom: 1px solid #cbd3dc;
+  height: 40px;
+  flex-shrink: 0;
+}
+
+.private-mode .split-toolbar {
+  background: #15101d;
+  border-bottom-color: #2b1f3c;
+}
+
+.split-toolbar .address-bar.compact {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  background: #ffffff;
+  flex: 1;
+}
+
+.private-mode .split-toolbar .address-bar.compact {
+  background: #1f182a;
+  border-color: #3b2e4f;
+}
+
+.split-toolbar .address-bar.compact input {
+  font-size: 12px;
+  height: 100%;
+}
+
+.split-content-area {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.split-pane .new-tab-page {
+  padding-top: 60px;
+}
+
 

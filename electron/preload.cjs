@@ -28,20 +28,20 @@ contextBridge.exposeInMainWorld('browserAPI', {
   clearAllData: () => ipcRenderer.invoke('session:clear-all-data'),
   
   // WebContentsView APIs
-  createView: (id, url, isPrivate) => ipcRenderer.invoke('views:create', id, url, isPrivate),
-  destroyView: (id) => ipcRenderer.invoke('views:destroy', id),
+  createView: (id, url, isPrivate, side) => ipcRenderer.invoke('views:create', id, url, isPrivate, side),
+  destroyView: (id, side) => ipcRenderer.invoke('views:destroy', id, side),
   selectView: (id) => ipcRenderer.invoke('views:select', id),
-  setViewBounds: (id, bounds) => ipcRenderer.invoke('views:set-bounds', id, bounds),
-  loadViewUrl: (id, url) => ipcRenderer.invoke('views:load-url', id, url),
-  goBackView: (id) => ipcRenderer.invoke('views:go-back', id),
-  goForwardView: (id) => ipcRenderer.invoke('views:go-forward', id),
-  reloadView: (id) => ipcRenderer.invoke('views:reload', id),
-  setViewZoom: (id, zoomLevel) => ipcRenderer.invoke('views:set-zoom', id, zoomLevel),
+  setViewBounds: (id, side, bounds) => ipcRenderer.invoke('views:set-bounds', id, side, bounds),
+  loadViewUrl: (id, side, url) => ipcRenderer.invoke('views:load-url', id, side, url),
+  goBackView: (id, side) => ipcRenderer.invoke('views:go-back', id, side),
+  goForwardView: (id, side) => ipcRenderer.invoke('views:go-forward', id, side),
+  reloadView: (id, side) => ipcRenderer.invoke('views:reload', id, side),
+  setViewZoom: (id, side, zoomLevel) => ipcRenderer.invoke('views:set-zoom', id, side, zoomLevel),
 
   // Cookie APIs
   getCookies: (domain, isPrivate) => ipcRenderer.invoke('session:get-cookies', domain, isPrivate),
   removeCookie: (url, name, isPrivate) => ipcRenderer.invoke('session:remove-cookie', url, name, isPrivate),
-  executeViewJavaScript: (id, script) => ipcRenderer.invoke('views:execute-javascript', id, script),
+  executeViewJavaScript: (id, side, script) => ipcRenderer.invoke('views:execute-javascript', id, side, script),
 
   onNewTabRequest: (callback) => {
     const listener = (_event, url, isPrivate) => callback(url, isPrivate);

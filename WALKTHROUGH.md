@@ -1,6 +1,6 @@
-# Govg Browser 提升成果报告（第一、二、三阶段已全部完成）
+# Govg Browser 提升成果报告
 
-我们已成功完成 Govg Browser 全部三个阶段的提升和重构！本文档详细汇总了各阶段的开发成果、架构设计、修改的文件列表以及相关的验证方法。
+我们已成功完成 Govg Browser 全部四个阶段的重构、优化与提升！本文档详细汇总了各阶段的开发成果、架构设计、修改的文件列表以及相关的验证方法。
 
 ---
 
@@ -30,42 +30,61 @@
 *   **深度隐私清理升级**：
     *   一键“清除所有浏览器数据”操作不仅清理 `defaultSession`，还会彻底清除普通模式分区 `persist:govg-browser` 目录下的所有本地数据（Cookies、LocalStorage、Cache、IndexDB等），保证清理的彻底性。
 
+### 4. 第四阶段：独立双分屏、Mac 控制圆点与网页防风控 (已完成)
+*   **独立分屏隔离（Session 隔离）**：
+    *   顶部栏新增一个“分屏 (Columns)”切换按钮。
+    *   启用分屏后，右分屏挂载在独立的隔离 Session 会话上（普通模式：`persist:govg-split-${tabId}`；无痕模式：`incognito-split-${tabId}`）。
+    *   右分屏采用独立的轻量级地址导航栏（包含后退、前进、刷新和专属输入框）。
+    *   左右分屏的 Cookies/缓存物理隔离，**支持同时登录同一个网站的不同账号**。
+    *   退出分屏时，销毁右分屏并安全清空右侧缓存，页面自动切回单屏并无缝保留左屏的已登录态和缓存。
+*   **macOS 圆点控制按钮**：
+    *   窗口控制按钮重塑为 macOS 风格的“红、黄、绿”三色交通灯圆点。
+    *   当鼠标 Hover 到控制区域时，圆点内部平滑渐显出对应的 `×`、`─`、`+` 细线符号，提供细腻的操作手感和高度的视觉美感。
+*   **网页防风控伪装（正规浏览器指纹对齐）**：
+    *   **User-Agent 全面伪装**：统一将包含默认、无痕、分屏等所有 Session 的 UA 重写为最新最正规的标准 Chrome UA，剔除 `Electron` 等指纹标记。
+    *   **抹除 webdriver**：在 `webview-preload.cjs` 的最开头注入安全保护脚本，拦截并重写 `navigator.webdriver` 属性为 `undefined`，并移除 Chrome 自动化探测特有的变量，避开绝大部分安全防护系统（如 Cloudflare WAF、登录页面防爬风控等）。
+
 ---
 
 ## 修改文件详情
 
 1.  **package.json**：
-    *   遵循 SemVer 规范，由于涉及重大底层渲染架构重构，版本号已升级至 `0.2.0`。
+    *   版本号已升级至 `0.3.0`。
 2.  **electron/main.js**：
-    *   清理废弃的 Webview 注入参数，实现 `WebContentsView` 的集中生命周期管理与事件转发（`views:create`, `views:destroy`, `views:select`, `views:set-bounds`, `views:load-url`, `views:go-back`, `views:go-forward`, `views:reload`, `views:set-zoom`, `views:execute-javascript`）。
-    *   优化 `session:get-cookies` 与 `session:remove-cookie` 支持 `isPrivate` 分区路由（`persist:govg-browser` / `incognito`）。
-    *   实现一键清理时同时清除自定义分区 `persist:govg-browser`。
+    *   在头部定义 `STANDARD_UA` 并应用到 `createWindow` 及 `whenReady` 中；
+    *   重塑 `tabViews` 映射表以记录 `leftView` 和 `rightView` 左右两个网页视窗；
+    *   升级 `views:` 系列 IPC 处理接口，接收 `side`（`'left'` / `'right'`）参数，并对右分屏配置独立的 session 分区；
+    *   在右分屏销毁时，主动调用 `clearStorageData` 释放右屏专属分区的本地存储。
 3.  **electron/preload.cjs**：
-    *   清理废弃的 `getWebviewPreload`。
-    *   暴露 `views` 的完整操控接口与 `getCookies`、`removeCookie` 传参设计。
-4.  **src/main.jsx**：
-    *   移除 DOM 中的 `<webview>` 节点，改用 `.webview-stage-placeholder` 并挂载 `ResizeObserver` 自动上报 bounds 尺寸变化。
-    *   重构 `tabs` 的事件流转订阅以配合主进程的 `views` 变更。
-    *   修改设置面板 of Cookie 管理逻辑，使其能根据当前标签页的 `isPrivate` 分区动态显示并删除对应会话中的 Cookie。
-5.  **src/styles.css**：
-    *   重塑网页占位符的布局控制。
-    *   为设置面板中的单站 Cookie 列表以及单项删除按钮设计了高质感的排版，在普通模式和无痕隐私模式下分别适配了细腻的玻璃质感样式。
+    *   扩展 `createView`, `destroyView`, `setViewBounds`, `loadViewUrl`, `goBackView`, `goForwardView`, `reloadView`, `setViewZoom` 以及 `executeViewJavaScript` 接口，支持传递 `side` 参数。
+4.  **electron/webview-preload.cjs**：
+    *   在文件头部注入 `navigator.webdriver` 抹除和 `chrome.runtime` 的防自动化探测处理脚本，防止网页安全风控判定。
+5.  **src/main.jsx**：
+    *   将右上角窗口控制重塑为 macOS 交通灯三圆点 HTML 结构（`mac-btn close`, `mac-btn minimize`, `mac-btn maximize`）；
+    *   在 toolbar 末尾增加了分屏 Columns 控制按钮；
+    *   重构 `navigate`、`tabs` 同步逻辑、Bounds 尺寸上报（双 `ResizeObserver` 分别定位左、右屏 placeholder 的 rect 边界），并在 ViewsEvent 监听里对 `side` 事件做精准的状态同步；
+    *   在双屏分屏时，右侧渲染带轻量地址栏和独立加载状态的分屏区域。
+6.  **src/styles.css**：
+    *   为 `.window-controls.macos-style` 交通灯红黄绿圆点及 Hover 时显示的 `×`、`─`、`+` 符号设计了细腻的动效样式；
+    *   编写了双屏分屏的网格分割布局、右侧 `.split-toolbar` 专属工具栏及地址栏的视觉美化样式。
 
 ---
 
 ## 验证与测试指引
 
-目前 Electron 主进程已成功启动，可以进行以下验证测试：
+目前 Electron 主进程已成功启动并顺畅运行，请按以下步骤验证第四阶段的核心功能：
 
-1.  **WebContentsView 渲染与布局验证**：
-    *   新建普通或无痕标签页，访问网站。
-    *   折叠和展开侧边栏（书签、设置），确认网页内容尺寸实时自适应，无白边、错位或渲染闪烁。
-    *   按下 `F11` 进入全屏，确认网页拉伸充满整个屏幕。
-2.  **细粒度 Cookie 读取与删除测试**：
-    *   打开任意有 Cookie 的网站（如 `bing.com`）。
-    *   点击工具栏右侧的齿轮图标打开“系统设置”。
-    *   确认在“当前网站 Cookies”一栏显示出当前站点的所有 Cookie 键名及其值。
-    *   点击某项 Cookie 后方的删除图标（垃圾桶），确认该 Cookie 即时在列表中消失。
-    *   在无痕模式下执行上述步骤，确保同样可以准确读取和删除 `incognito` 内存分区中的 Cookie。
-3.  **隐私清理测试**：
-    *   点击“清除所有浏览器数据”，确认系统弹出警告框，点击确定后普通标签页下的所有持久化 Cookie 与存储瞬间清空。
+1.  **macOS 交通灯按钮验证**：
+    *   确认右上角三个按钮变为精致的红、黄、绿圆点。
+    *   鼠标 Hover 到该区域时，验证圆点中隐约显出极细的操作图标。
+2.  **左右屏多账号登录验证**：
+    *   点击工具栏右侧的“分屏”按钮，开启双屏。
+    *   在左屏输入 `https://www.bing.com` 并登录账号 A。
+    *   在右屏的紧凑地址栏中输入 `https://www.bing.com`，确认右屏并没有继承账号 A，然后登录账号 B。
+    *   验证左右屏是否可以**同时保持两个不同账号的在线状态**，且互不干扰。
+    *   点击右侧分屏的“关闭分屏”按钮，刷新左屏，验证左屏的账号 A 登录态依然存在，这证明了 Session 缓存物理隔离的正确性。
+3.  **防风控与 UA 检查**：
+    *   在左屏或右分屏输入 `https://bot.sannysoft.com`。
+    *   确认检测结果中：
+        *   `User-Agent` 不包含任何 `Electron` 关键字，呈现为标准 Chrome。
+        *   `navigator.webdriver` 判定为 `false` 或 `undefined`，成功绕过自动化指纹检测。

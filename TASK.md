@@ -1,35 +1,24 @@
-# Govg Browser 提升任务跟踪
+# Govg Browser 提升任务跟踪 - 第四阶段开发
 
-- `[x]` 1. 主进程支持常用网址存储与窗口全屏控制
-  - `[x]` 更新 [main.js](file:///D:/ai/bs/electron/main.js) 的 `store` 默认配置加入 `quickLinks`
-  - `[x]` 实现 `quicklinks:list`, `quicklinks:save`, `quicklinks:remove` IPC 响应
-  - `[x]` 实现 `window:fullscreen-toggle` IPC 响应
-- `[x]` 2. 预加载脚本接口暴露与键盘拦截
-  - `[x]` 在 [preload.cjs](file:///D:/ai/bs/electron/preload.cjs) 暴露 `quickLinks` API 和 `toggleFullscreen` API
-  - `[x]` 在 [webview-preload.cjs](file:///D:/ai/bs/electron/webview-preload.cjs) 拦截 `Ctrl + = / - / 0` 和 `F11` 并发回宿主
-- `[x]` 3. 渲染进程核心逻辑与 UI 改造
-  - `[x]` 在 [main.jsx](file:///D:/ai/bs/src/main.jsx) 中添加快捷键监听及缩放/全屏状态处理
-  - `[x]` 改造 `NewTabPage` 组件支持自定义链接的增删操作
-  - `[x]` 增加侧边栏（书签、历史记录）的过滤搜索框及过滤展示逻辑
-- `[x]` 4. 界面样式优化
-  - `[x]` 在 [styles.css](file:///D:/ai/bs/src/styles.css) 中实现全屏时隐藏标题栏/工具栏 the 样式
-  - `[x]` 实现新标签页快捷链接操作 UI 样式
-  - `[x]` 实现侧边栏搜索框样式与地址栏缩放百分比气泡样式
-- `[x]` 5. 功能运行测试与验证
-  - `[x]` 测试常用网址增删
-  - `[x]` 测试网页缩放（Ctrl + =/-）及倍率显示
-  - `[x]` 测试 F11 沉浸全屏
-  - `[x]` 测试书签历史记录搜索过滤
-- `[x]` 6. 第二阶段：无痕隐私模式、设置面板与广告拦截升级
-  - `[x]` 更新 [main.js](file:///D:/ai/bs/electron/main.js) 加入 settings 读写、清除浏览器数据及优化广告拦截 hosts 集成
-  - `[x]` 更新 [preload.cjs](file:///D:/ai/bs/electron/preload.cjs) 暴露 settings 和清理接口
-  - `[x]` 更新 [main.jsx](file:///D:/ai/bs/src/main.jsx) 支持设置面板、动态搜索引擎及新建无痕标签页
-  - `[x]` 更新 [styles.css](file:///D:/ai/bs/src/styles.css) 编写设置界面与无痕模式暗色皮肤样式
-  - `[x]` 验证无痕隔离、搜索引擎切换和数据清理逻辑
-- `[x]` 7. 第三阶段：技术架构升级 (WebContentsView 与 Cookie 会话管理)
-  - `[x]` 规划重构 Webview 渲染，使用新版 `WebContentsView` 架构
-  - `[x]` 实现 Cookie 细粒度管理及清除指定站点 Session
-  - `[x]` 测试重构稳定性与性能表现
-- `[x]` 8. 工程化交付 (版本号更新与 Git 提交推送)
-  - `[x]` 更新 [package.json](file:///D:/ai/bs/package.json) 中的版本号至 `0.2.0`
-  - `[x]` 运行 Git 提交流程，采用符合规范的中文 commit 注释并推送至远程分支
+- `[x]` 1. 主进程支持双屏 View 隔离、UA 伪装与下载关联
+  - `[x]` 在 [main.js](file:///D:/ai/bs/electron/main.js) 中扩展 `tabViews` 映射为包含左右双 View 结构
+  - `[x]` 对所有 session（普通、无痕、分屏）统一覆写标准最新 Chrome User-Agent
+  - `[x]` 升级 IPC 通道 `views:create`, `views:destroy`, `views:select`, `views:set-bounds` 支持 `side` 参数
+  - `[x]` 确保分屏 session 自动绑定 adblocker 与下载监听器
+- `[x]` 2. 预加载脚本与防风控注入
+  - `[x]` 在 [preload.cjs](file:///D:/ai/bs/electron/preload.cjs) 扩展 views 控制 API 并传递 `side` 标识
+  - `[x]` 在 [webview-preload.cjs](file:///D:/ai/bs/electron/webview-preload.cjs) 头部注入抹除 `navigator.webdriver` 痕迹的防检测代码
+- `[x]` 3. 渲染进程 UI 布局、双屏状态及 Mac 按钮重构
+  - `[x]` 在 [main.jsx](file:///D:/ai/bs/src/main.jsx) 中将右上角窗口控制按钮重构为 macOS 三色交通灯结构
+  - `[x]` 扩展 Tab 状态，加入 `splitMode`、`rightUrl` 等字段，并新增分屏切换按钮
+  - `[x]` 渲染分屏双占位容器，挂载双 `ResizeObserver` 实时上报 bounds
+  - `[x]` 渲染右分屏独立的轻量级地址导航栏
+- `[x]` 4. 界面样式编写与美化
+  - `[x]` 在 [styles.css](file:///D:/ai/bs/src/styles.css) 中编写 macOS 控制按钮红黄绿及其 hover 细线字符样式
+  - `[x]` 编写双屏 50/50 宽度分割线及分屏下地址栏等 UI 布局样式
+- `[x]` 5. 功能运行测试与交付
+  - `[x]` 验证右上角 Mac 控制圆点样式与 Hover 图标渐显
+  - `[x]` 测试同一站点在左右双屏下的不同账号登录（Session 隔离验证）
+  - `[x]` 测试切换回单屏后左侧账号登录态的保留
+  - `[x]` 测试在 `bot.sannysoft.com` 上的防 webdriver 和 UA 检测结果
+  - `[x]` 更新版本号至 `0.3.0` 并使用规范中文注释进行 Git 提交推送

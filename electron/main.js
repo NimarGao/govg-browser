@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Store from 'electron-store';
 
+const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -109,6 +110,7 @@ function createWindow() {
     }
   });
 
+  win.webContents.setUserAgent(STANDARD_UA);
   win.once('ready-to-show', () => win.show());
 
   if (isDev) {
@@ -289,6 +291,7 @@ function installRequestBlocker() {
 }
 
 app.whenReady().then(() => {
+  session.defaultSession.setUserAgent(STANDARD_UA);
   app.setAppUserModelId('com.nimargao.govgbrowser');
   Menu.setApplicationMenu(null);
   installNewTabHandler();
@@ -501,8 +504,14 @@ ipcMain.handle('session:clear-all-data', async () => {
   }
 });
 
-function createTabView(win, tabId, url, isPrivate) {
-  const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
+function createTabView(win, tabId, url, isPrivate, side = 'left') {
+  let sess;
+  if (side === 'left') {
+    sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
+  } else {
+    sess = session.fromPartition(isPrivate ? `incognito-split-${tabId}` : `persist:govg-split-${tabId}`);
+  }
+  sess.setUserAgent(STANDARD_UA);
   registerBlockerOnSession(sess);
   registerDownloadOnSession(sess);
 
@@ -516,28 +525,44 @@ function createTabView(win, tabId, url, isPrivate) {
     }
   });
 
-  tabViews.set(tabId, {
-    view,
-    isPrivate,
-    zoomLevel: 0
-  });
+  let tv = tabViews.get(tabId);
+  if (!tv) {
+    tv = {
+      leftView: null,
+      rightView: null,
+      isPrivate,
+      leftZoomLevel: 0,
+      rightZoomLevel: 0
+    };
+    tabViews.set(tabId, tv);
+  }
+
+  if (side === 'left') {
+    tv.leftView = view;
+  } else {
+    tv.rightView = view;
+  }
 
   const wc = view.webContents;
 
   wc.on('did-start-loading', () => {
-    win.webContents.send('views:event', tabId, 'did-start-loading');
+    win.webContents.send('views:event', tabId, 'did-start-loading', { side });
   });
 
   wc.on('dom-ready', () => {
-    win.webContents.send('views:event', tabId, 'dom-ready');
-    const tv = tabViews.get(tabId);
-    if (tv && tv.zoomLevel !== 0) {
-      wc.setZoomLevel(tv.zoomLevel);
+    win.webContents.send('views:event', tabId, 'dom-ready', { side });
+    const currentTv = tabViews.get(tabId);
+    if (currentTv) {
+      const zoom = side === 'left' ? currentTv.leftZoomLevel : currentTv.rightZoomLevel;
+      if (zoom !== 0) {
+        wc.setZoomLevel(zoom);
+      }
     }
   });
 
   wc.on('did-stop-loading', () => {
     win.webContents.send('views:event', tabId, 'did-stop-loading', {
+      side,
       canGoBack: wc.canGoBack(),
       canGoForward: wc.canGoForward(),
       url: wc.getURL(),
@@ -546,20 +571,21 @@ function createTabView(win, tabId, url, isPrivate) {
   });
 
   wc.on('page-title-updated', (event, title) => {
-    win.webContents.send('views:event', tabId, 'page-title-updated', { title });
+    win.webContents.send('views:event', tabId, 'page-title-updated', { side, title });
   });
 
   wc.on('did-navigate', (event, newUrl) => {
-    win.webContents.send('views:event', tabId, 'did-navigate', { url: newUrl });
+    win.webContents.send('views:event', tabId, 'did-navigate', { side, url: newUrl });
   });
 
   wc.on('did-navigate-in-page', (event, newUrl) => {
-    win.webContents.send('views:event', tabId, 'did-navigate-in-page', { url: newUrl });
+    win.webContents.send('views:event', tabId, 'did-navigate-in-page', { side, url: newUrl });
   });
 
   wc.on('did-fail-load', (event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return;
     win.webContents.send('views:event', tabId, 'did-fail-load', {
+      side,
       errorCode,
       errorDescription: errorDescription || '页面加载失败',
       validatedURL
@@ -567,7 +593,7 @@ function createTabView(win, tabId, url, isPrivate) {
   });
 
   wc.on('ipc-message', (event, channel, ...args) => {
-    win.webContents.send('views:event', tabId, 'ipc-message', { channel, args });
+    win.webContents.send('views:event', tabId, 'ipc-message', { side, channel, args });
   });
 
   wc.setWindowOpenHandler(({ url }) => {
@@ -622,19 +648,31 @@ function createTabView(win, tabId, url, isPrivate) {
   }
 }
 
-ipcMain.handle('views:create', (event, tabId, url, isPrivate) => {
+ipcMain.handle('views:create', (event, tabId, url, isPrivate, side = 'left') => {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (win) createTabView(win, tabId, url, isPrivate);
+  if (win) createTabView(win, tabId, url, isPrivate, side);
 });
 
-ipcMain.handle('views:destroy', (event, tabId) => {
+ipcMain.handle('views:destroy', (event, tabId, side = 'left') => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const tv = tabViews.get(tabId);
   if (tv) {
-    try {
-      win.contentView.removeChildView(tv.view);
-    } catch {}
-    tabViews.delete(tabId);
+    if (side === 'left' && tv.leftView) {
+      try {
+        win.contentView.removeChildView(tv.leftView);
+      } catch {}
+      tv.leftView = null;
+    } else if (side === 'right' && tv.rightView) {
+      try {
+        win.contentView.removeChildView(tv.rightView);
+      } catch {}
+      const splitSess = session.fromPartition(tv.isPrivate ? `incognito-split-${tabId}` : `persist:govg-split-${tabId}`);
+      splitSess.clearStorageData().catch(() => {});
+      tv.rightView = null;
+    }
+    if (!tv.leftView && !tv.rightView) {
+      tabViews.delete(tabId);
+    }
   }
 });
 
@@ -645,7 +683,8 @@ ipcMain.handle('views:select', (event, tabId) => {
   for (const [id, tv] of tabViews.entries()) {
     if (id !== tabId) {
       try {
-        win.contentView.removeChildView(tv.view);
+        if (tv.leftView) win.contentView.removeChildView(tv.leftView);
+        if (tv.rightView) win.contentView.removeChildView(tv.rightView);
       } catch {}
     }
   }
@@ -653,56 +692,77 @@ ipcMain.handle('views:select', (event, tabId) => {
   const activeTv = tabViews.get(tabId);
   if (activeTv) {
     try {
-      win.contentView.addChildView(activeTv.view);
+      if (activeTv.leftView) win.contentView.addChildView(activeTv.leftView);
+      if (activeTv.rightView) win.contentView.addChildView(activeTv.rightView);
     } catch {}
   }
 });
 
-ipcMain.handle('views:set-bounds', (event, tabId, bounds) => {
+ipcMain.handle('views:set-bounds', (event, tabId, side, bounds) => {
   const tv = tabViews.get(tabId);
   if (tv && bounds) {
-    tv.view.setBounds({
-      x: Math.round(bounds.x),
-      y: Math.round(bounds.y),
-      width: Math.round(bounds.width),
-      height: Math.round(bounds.height)
-    });
+    const view = side === 'left' ? tv.leftView : tv.rightView;
+    if (view) {
+      view.setBounds({
+        x: Math.round(bounds.x),
+        y: Math.round(bounds.y),
+        width: Math.round(bounds.width),
+        height: Math.round(bounds.height)
+      });
+    }
   }
 });
 
-ipcMain.handle('views:load-url', (event, tabId, url) => {
+ipcMain.handle('views:load-url', (event, tabId, side, url) => {
   const tv = tabViews.get(tabId);
   if (tv && url && url !== 'swift://newtab') {
-    tv.view.webContents.loadURL(url).catch(() => {});
+    const view = side === 'left' ? tv.leftView : tv.rightView;
+    if (view) {
+      view.webContents.loadURL(url).catch(() => {});
+    }
   }
 });
 
-ipcMain.handle('views:go-back', (event, tabId) => {
-  const tv = tabViews.get(tabId);
-  if (tv && tv.view.webContents.canGoBack()) {
-    tv.view.webContents.goBack();
-  }
-});
-
-ipcMain.handle('views:go-forward', (event, tabId) => {
-  const tv = tabViews.get(tabId);
-  if (tv && tv.view.webContents.canGoForward()) {
-    tv.view.webContents.goForward();
-  }
-});
-
-ipcMain.handle('views:reload', (event, tabId) => {
+ipcMain.handle('views:go-back', (event, tabId, side = 'left') => {
   const tv = tabViews.get(tabId);
   if (tv) {
-    tv.view.webContents.reload();
+    const view = side === 'left' ? tv.leftView : tv.rightView;
+    if (view && view.webContents.canGoBack()) {
+      view.webContents.goBack();
+    }
   }
 });
 
-ipcMain.handle('views:set-zoom', (event, tabId, zoomLevel) => {
+ipcMain.handle('views:go-forward', (event, tabId, side = 'left') => {
   const tv = tabViews.get(tabId);
   if (tv) {
-    tv.zoomLevel = zoomLevel;
-    tv.view.webContents.setZoomLevel(zoomLevel);
+    const view = side === 'left' ? tv.leftView : tv.rightView;
+    if (view && view.webContents.canGoForward()) {
+      view.webContents.goForward();
+    }
+  }
+});
+
+ipcMain.handle('views:reload', (event, tabId, side = 'left') => {
+  const tv = tabViews.get(tabId);
+  if (tv) {
+    const view = side === 'left' ? tv.leftView : tv.rightView;
+    if (view) {
+      view.webContents.reload();
+    }
+  }
+});
+
+ipcMain.handle('views:set-zoom', (event, tabId, side, zoomLevel) => {
+  const tv = tabViews.get(tabId);
+  if (tv) {
+    if (side === 'left') {
+      tv.leftZoomLevel = zoomLevel;
+      if (tv.leftView) tv.leftView.webContents.setZoomLevel(zoomLevel);
+    } else {
+      tv.rightZoomLevel = zoomLevel;
+      if (tv.rightView) tv.rightView.webContents.setZoomLevel(zoomLevel);
+    }
   }
 });
 
@@ -728,10 +788,13 @@ ipcMain.handle('session:remove-cookie', async (event, url, name, isPrivate) => {
   }
 });
 
-ipcMain.handle('views:execute-javascript', (event, tabId, script) => {
+ipcMain.handle('views:execute-javascript', (event, tabId, side, script) => {
   const tv = tabViews.get(tabId);
   if (tv) {
-    return tv.view.webContents.executeJavaScript(script).catch(() => {});
+    const view = side === 'left' ? tv.leftView : tv.rightView;
+    if (view) {
+      return view.webContents.executeJavaScript(script).catch(() => {});
+    }
   }
   return false;
 });

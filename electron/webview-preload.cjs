@@ -1,3 +1,12 @@
+try {
+  Object.defineProperty(navigator, 'webdriver', {
+    get: () => undefined
+  });
+  if (window.chrome) {
+    window.chrome.runtime = window.chrome.runtime || {};
+  }
+} catch (e) {}
+
 const { ipcRenderer } = require('electron');
 
 function getFieldLabel(input) {

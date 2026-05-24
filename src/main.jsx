@@ -6,6 +6,7 @@ import {
   Bookmark,
   BookmarkPlus,
   Clock3,
+  Columns,
   Download,
   Eye,
   EyeOff,
@@ -63,7 +64,17 @@ function createTab(url = HOME_URL, isPrivate = false) {
     canGoBack: false,
     canGoForward: false,
     zoomLevel: 0,
-    isPrivate
+    isPrivate,
+    // 分屏相关参数
+    splitMode: false,
+    rightUrl: HOME_URL,
+    rightInput: '',
+    rightLoading: false,
+    rightError: null,
+    rightCanGoBack: false,
+    rightCanGoForward: false,
+    rightZoomLevel: 0,
+    rightTitle: '新标签页'
   };
 }
 
@@ -311,12 +322,18 @@ function App() {
     window.browserAPI.listCredentialsForOrigin(activeTab.url).then(setCredentials);
   }, [activeTab?.url]);
 
-  const navigate = useCallback((id, value) => {
+  const navigate = useCallback((id, value, side = 'left') => {
     const url = toNavigableUrl(value, settingsRef.current?.defaultSearchEngine || 'bing');
-    updateTab(id, { url, input: url, loading: true, error: null });
-    
-    if (createdViewsRef.current.has(id)) {
-      window.browserAPI.loadViewUrl(id, url);
+    if (side === 'left') {
+      updateTab(id, { url, input: url, loading: true, error: null });
+      if (createdViewsRef.current.has(id + '-left')) {
+        window.browserAPI.loadViewUrl(id, 'left', url);
+      }
+    } else {
+      updateTab(id, { rightUrl: url, rightInput: url, rightLoading: true, rightError: null });
+      if (createdViewsRef.current.has(id + '-right')) {
+        window.browserAPI.loadViewUrl(id, 'right', url);
+      }
     }
   }, [updateTab]);
 
@@ -350,18 +367,27 @@ function App() {
       if (idx < ZOOM_LEVELS.length - 1) {
         const nextZoom = ZOOM_LEVELS[idx + 1];
         updateTab(currActiveId, { zoomLevel: nextZoom });
-        window.browserAPI.setViewZoom(currActiveId, nextZoom);
+        window.browserAPI.setViewZoom(currActiveId, 'left', nextZoom);
+        if (currActiveTab.splitMode) {
+          window.browserAPI.setViewZoom(currActiveId, 'right', nextZoom);
+        }
       }
     } else if (ctrlKey && key === '-') {
       const idx = ZOOM_LEVELS.indexOf(currActiveTab.zoomLevel || 0);
       if (idx > 0) {
         const nextZoom = ZOOM_LEVELS[idx - 1];
         updateTab(currActiveId, { zoomLevel: nextZoom });
-        window.browserAPI.setViewZoom(currActiveId, nextZoom);
+        window.browserAPI.setViewZoom(currActiveId, 'left', nextZoom);
+        if (currActiveTab.splitMode) {
+          window.browserAPI.setViewZoom(currActiveId, 'right', nextZoom);
+        }
       }
     } else if (ctrlKey && key === '0') {
       updateTab(currActiveId, { zoomLevel: 0 });
-      window.browserAPI.setViewZoom(currActiveId, 0);
+      window.browserAPI.setViewZoom(currActiveId, 'left', 0);
+      if (currActiveTab.splitMode) {
+        window.browserAPI.setViewZoom(currActiveId, 'right', 0);
+      }
     }
   }, [updateTab]);
 
@@ -389,48 +415,70 @@ function App() {
   // Synchronize tabs with native views
   useEffect(() => {
     tabs.forEach((tab) => {
-      if (!isAppHome(tab.url) && !createdViewsRef.current.has(tab.id)) {
-        createdViewsRef.current.add(tab.id);
-        window.browserAPI.createView(tab.id, tab.url, tab.isPrivate);
+      if (!isAppHome(tab.url) && !createdViewsRef.current.has(tab.id + '-left')) {
+        createdViewsRef.current.add(tab.id + '-left');
+        window.browserAPI.createView(tab.id, tab.url, tab.isPrivate, 'left');
+      }
+      if (tab.splitMode && !isAppHome(tab.rightUrl) && !createdViewsRef.current.has(tab.id + '-right')) {
+        createdViewsRef.current.add(tab.id + '-right');
+        window.browserAPI.createView(tab.id, tab.rightUrl, tab.isPrivate, 'right');
+      }
+      if (!tab.splitMode && createdViewsRef.current.has(tab.id + '-right')) {
+        createdViewsRef.current.delete(tab.id + '-right');
+        window.browserAPI.destroyView(tab.id, 'right');
       }
     });
 
-    const currentTabIds = new Set(tabs.map((t) => t.id));
-    for (const tabId of createdViewsRef.current) {
-      if (!currentTabIds.has(tabId)) {
-        createdViewsRef.current.delete(tabId);
-        window.browserAPI.destroyView(tabId);
+    const currentTabLeftIds = new Set(tabs.map((t) => t.id + '-left'));
+    const currentTabRightIds = new Set(tabs.filter(t => t.splitMode).map((t) => t.id + '-right'));
+    for (const key of createdViewsRef.current) {
+      if (!currentTabLeftIds.has(key) && !currentTabRightIds.has(key)) {
+        createdViewsRef.current.delete(key);
+        const parts = key.split('-');
+        const side = parts.pop();
+        const tabId = parts.join('-');
+        window.browserAPI.destroyView(tabId, side);
       }
     }
   }, [tabs]);
 
   // Handle ResizeObserver and selectView bounds synchronization
-  const stageRef = useRef(null);
-  useEffect(() => {
-    if (!stageRef.current || !activeTab || isAppHome(activeTab.url)) {
-      window.browserAPI.selectView(null);
-      return;
-    }
+  const stageLeftRef = useRef(null);
+  const stageRightRef = useRef(null);
 
-    const reportBounds = () => {
-      if (!stageRef.current) return;
-      const rect = stageRef.current.getBoundingClientRect();
-      const bounds = {
-        x: rect.x,
-        y: rect.y,
-        width: rect.width,
-        height: rect.height
-      };
-      window.browserAPI.setViewBounds(activeTab.id, bounds);
-    };
+  useEffect(() => {
+    if (!activeTab) return;
 
     window.browserAPI.selectView(activeTab.id);
+
+    const reportBounds = () => {
+      if (stageLeftRef.current && !isAppHome(activeTab.url)) {
+        const rect = stageLeftRef.current.getBoundingClientRect();
+        window.browserAPI.setViewBounds(activeTab.id, 'left', {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        });
+      }
+      if (stageRightRef.current && activeTab.splitMode && !isAppHome(activeTab.rightUrl)) {
+        const rect = stageRightRef.current.getBoundingClientRect();
+        window.browserAPI.setViewBounds(activeTab.id, 'right', {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height
+        });
+      }
+    };
+
     reportBounds();
 
     const observer = new ResizeObserver(() => {
       reportBounds();
     });
-    observer.observe(stageRef.current);
+    if (stageLeftRef.current) observer.observe(stageLeftRef.current);
+    if (stageRightRef.current) observer.observe(stageRightRef.current);
 
     window.addEventListener('resize', reportBounds);
 
@@ -438,51 +486,83 @@ function App() {
       observer.disconnect();
       window.removeEventListener('resize', reportBounds);
     };
-  }, [activeTab?.id, activeTab?.url, showBookmarks, showHistory, showDownloads, showPasswords, showSettings]);
+  }, [activeTab?.id, activeTab?.url, activeTab?.splitMode, activeTab?.rightUrl, showBookmarks, showHistory, showDownloads, showPasswords, showSettings]);
 
   // Listen to native views IPC & lifecycle events
   useEffect(() => {
     return window.browserAPI.onViewsEvent(async (tabId, eventName, details) => {
+      const { side } = details || {};
       if (eventName === 'did-start-loading') {
-        updateTab(tabId, { loading: true });
+        if (side === 'left') {
+          updateTab(tabId, { loading: true });
+        } else {
+          updateTab(tabId, { rightLoading: true });
+        }
       } else if (eventName === 'did-stop-loading') {
         const { canGoBack, canGoForward, url, title } = details;
-        updateTab(tabId, {
-          loading: false,
-          canGoBack,
-          canGoForward,
-          url,
-          input: url,
-          title: title || '未命名页面'
-        });
-        
-        const currTabs = tabsRef.current;
-        const tab = currTabs.find(t => t.id === tabId);
-        if (tab && !tab.isPrivate && url) {
-          setHistory(await window.browserAPI.addHistory({ title, url }));
-        }
-
-        if (tabId === resolvedActiveIdRef.current && url) {
-          setCredentials(await window.browserAPI.listCredentialsForOrigin(url));
+        if (side === 'left') {
+          updateTab(tabId, {
+            loading: false,
+            canGoBack,
+            canGoForward,
+            url,
+            input: url,
+            title: title || '未命名页面'
+          });
+          const currTabs = tabsRef.current;
+          const tab = currTabs.find(t => t.id === tabId);
+          if (tab && !tab.isPrivate && url) {
+            setHistory(await window.browserAPI.addHistory({ title, url }));
+          }
+          if (tabId === resolvedActiveIdRef.current && url) {
+            setCredentials(await window.browserAPI.listCredentialsForOrigin(url));
+          }
+        } else {
+          updateTab(tabId, {
+            rightLoading: false,
+            rightCanGoBack: canGoBack,
+            rightCanGoForward: canGoForward,
+            rightUrl: url,
+            rightInput: url,
+            rightTitle: title || '未命名页面'
+          });
         }
       } else if (eventName === 'page-title-updated') {
-        updateTab(tabId, { title: details.title || '未命名页面' });
-      } else if (eventName === 'did-navigate') {
-        updateTab(tabId, { url: details.url, input: details.url });
-      } else if (eventName === 'did-navigate-in-page') {
-        updateTab(tabId, { url: details.url, input: details.url });
+        if (side === 'left') {
+          updateTab(tabId, { title: details.title || '未命名页面' });
+        } else {
+          updateTab(tabId, { rightTitle: details.title || '未命名页面' });
+        }
+      } else if (eventName === 'did-navigate' || eventName === 'did-navigate-in-page') {
+        if (side === 'left') {
+          updateTab(tabId, { url: details.url, input: details.url });
+        } else {
+          updateTab(tabId, { rightUrl: details.url, rightInput: details.url });
+        }
       } else if (eventName === 'did-fail-load') {
-        updateTab(tabId, {
-          loading: false,
-          error: {
-            code: details.errorCode,
-            description: details.errorDescription || '页面加载失败',
-            url: details.validatedURL
-          }
-        });
+        if (side === 'left') {
+          updateTab(tabId, {
+            loading: false,
+            error: {
+              code: details.errorCode,
+              description: details.errorDescription || '页面加载失败',
+              url: details.validatedURL
+            }
+          });
+        } else {
+          updateTab(tabId, {
+            rightLoading: false,
+            rightError: {
+              code: details.errorCode,
+              description: details.errorDescription || '页面加载失败',
+              url: details.validatedURL
+            }
+          });
+        }
       } else if (eventName === 'ipc-message') {
         const { channel, args } = details;
         if (channel === 'credential-captured') {
+          if (side !== 'left') return;
           const currTabs = tabsRef.current;
           const tab = currTabs.find(t => t.id === tabId);
           if (tab && tab.isPrivate) return;
@@ -606,16 +686,10 @@ function App() {
             <EyeOff size={15} />
           </button>
         </div>
-        <div className="window-controls">
-          <button className="window-button" title="最小化" onClick={() => window.browserAPI.minimizeWindow()}>
-            <Minus size={16} />
-          </button>
-          <button className="window-button" title="最大化" onClick={() => window.browserAPI.toggleMaximizeWindow()}>
-            <Maximize2 size={15} />
-          </button>
-          <button className="window-button close" title="关闭" onClick={() => window.browserAPI.closeWindow()}>
-            <X size={16} />
-          </button>
+        <div className="window-controls macos-style">
+          <button className="mac-btn close" title="关闭" onClick={() => window.browserAPI.closeWindow()}></button>
+          <button className="mac-btn minimize" title="最小化" onClick={() => window.browserAPI.minimizeWindow()}></button>
+          <button className="mac-btn maximize" title="最大化" onClick={() => window.browserAPI.toggleMaximizeWindow()}></button>
         </div>
       </section>
 
@@ -707,6 +781,17 @@ function App() {
           setShowPasswords(false);
         }}>
           <Settings size={18} />
+        </button>
+        <button
+          className={`icon-button ${activeTab?.splitMode ? 'active' : ''}`}
+          title={activeTab?.splitMode ? "退出分屏" : "双屏分屏"}
+          onClick={() => {
+            if (!activeTab) return;
+            const nextMode = !activeTab.splitMode;
+            updateTab(activeTab.id, { splitMode: nextMode });
+          }}
+        >
+          <Columns size={18} />
         </button>
       </section>
 
@@ -952,34 +1037,89 @@ function App() {
           </aside>
         )}
 
-        <section className="webview-stage">
-          {activeTab && !isAppHome(activeTab.url) && (
-            <div
-              className="webview-stage-placeholder visible"
-              ref={stageRef}
-            />
-          )}
-          {isAppHome(activeTab?.url) && (
-            <NewTabPage
-              quickLinks={quickLinks}
-              onNavigate={(value) => navigate(activeTab.id, value)}
-              onAddQuickLink={async (item) => {
-                const next = await window.browserAPI.saveQuickLink(item);
-                setQuickLinks(next);
-              }}
-              onRemoveQuickLink={async (id) => {
-                const next = await window.browserAPI.removeQuickLink(id);
-                setQuickLinks(next);
-              }}
-            />
-          )}
-          {activeTab?.error && (
-            <div className="page-error">
-              <strong>无法打开网页</strong>
-              <span>{activeTab.error.description}</span>
-              <button className="primary-button" onClick={() => navigate(activeTab.id, activeTab.error.url)}>
-                重试
-              </button>
+        <section className={`webview-stage ${activeTab?.splitMode ? 'split-mode' : 'single-mode'}`}>
+          {/* 左侧分屏 / 单屏主区域 */}
+          <div className="split-pane left-pane">
+            {isAppHome(activeTab?.url) ? (
+              <NewTabPage
+                quickLinks={quickLinks}
+                onNavigate={(value) => navigate(activeTab.id, value, 'left')}
+                onAddQuickLink={async (item) => {
+                  const next = await window.browserAPI.saveQuickLink(item);
+                  setQuickLinks(next);
+                }}
+                onRemoveQuickLink={async (id) => {
+                  const next = await window.browserAPI.removeQuickLink(id);
+                  setQuickLinks(next);
+                }}
+              />
+            ) : activeTab?.error ? (
+              <div className="page-error">
+                <strong>无法打开网页</strong>
+                <span>{activeTab.error.description}</span>
+                <button className="primary-button" onClick={() => navigate(activeTab.id, activeTab.error.url, 'left')}>
+                  重试
+                </button>
+              </div>
+            ) : (
+              <div className="webview-stage-placeholder visible" ref={stageLeftRef} />
+            )}
+          </div>
+
+          {/* 右侧分屏区域 */}
+          {activeTab?.splitMode && (
+            <div className="split-pane right-pane">
+              <div className="split-toolbar">
+                <button className="icon-button small" disabled={!activeTab.rightCanGoBack} onClick={() => window.browserAPI.goBackView(activeTab.id, 'right')}>
+                  <ArrowLeft size={14} />
+                </button>
+                <button className="icon-button small" disabled={!activeTab.rightCanGoForward} onClick={() => window.browserAPI.goForwardView(activeTab.id, 'right')}>
+                  <ArrowRight size={14} />
+                </button>
+                <button className="icon-button small" onClick={() => window.browserAPI.reloadView(activeTab.id, 'right')}>
+                  <RefreshCw size={14} />
+                </button>
+                <form className="address-bar compact" onSubmit={(e) => {
+                  e.preventDefault();
+                  navigate(activeTab.id, activeTab.rightInput, 'right');
+                }}>
+                  <input
+                    value={activeTab.rightInput || ''}
+                    onChange={(e) => updateTab(activeTab.id, { rightInput: e.target.value })}
+                    placeholder="在右侧分屏中搜索或输入网址"
+                    spellCheck="false"
+                  />
+                </form>
+                <button className="icon-button small close-split-btn" title="关闭分屏" onClick={() => updateTab(activeTab.id, { splitMode: false })}>
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="split-content-area">
+                {isAppHome(activeTab.rightUrl) ? (
+                  <NewTabPage
+                    quickLinks={quickLinks}
+                    onNavigate={(value) => navigate(activeTab.id, value, 'right')}
+                    onAddQuickLink={async (item) => {
+                      const next = await window.browserAPI.saveQuickLink(item);
+                      setQuickLinks(next);
+                    }}
+                    onRemoveQuickLink={async (id) => {
+                      const next = await window.browserAPI.removeQuickLink(id);
+                      setQuickLinks(next);
+                    }}
+                  />
+                ) : activeTab.rightError ? (
+                  <div className="page-error">
+                    <strong>无法打开网页</strong>
+                    <span>{activeTab.rightError.description}</span>
+                    <button className="primary-button" onClick={() => navigate(activeTab.id, activeTab.rightError.url, 'right')}>
+                      重试
+                    </button>
+                  </div>
+                ) : (
+                  <div className="webview-stage-placeholder visible" ref={stageRightRef} />
+                )}
+              </div>
             </div>
           )}
         </section>
