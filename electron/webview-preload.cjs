@@ -130,17 +130,61 @@ try {
           });
         }
 
-        // 4. 模拟 plugins
-        if (!navigator.plugins || navigator.plugins.length === 0) {
-          const mockPlugins = [
-            { name: 'PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
-            { name: 'Chrome PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' },
-            { name: 'Chromium PDF Viewer', description: 'Portable Document Format', filename: 'internal-pdf-viewer' }
-          ];
+        // 4. 模拟 plugins，完美伪装 Shockwave Flash 插件绕过 SWFObject 检测
+        try {
+          const mockFlashPlugin = {
+            name: "Shockwave Flash",
+            description: "Shockwave Flash 32.0 r0",
+            filename: "pepflashplayer.dll",
+            length: 1,
+            item: function(index) { return this; },
+            namedItem: function(name) { return this; }
+          };
+          mockFlashPlugin[0] = {
+            type: "application/x-shockwave-flash",
+            suffixes: "swf",
+            description: "Shockwave Flash",
+            enabledPlugin: mockFlashPlugin
+          };
+
+          const mockPlugins = {
+            "Shockwave Flash": mockFlashPlugin,
+            length: 1,
+            item: function(index) { return mockFlashPlugin; },
+            namedItem: function(name) { return mockFlashPlugin; },
+            refresh: function() {}
+          };
+          mockPlugins[0] = mockFlashPlugin;
+
           Object.defineProperty(navigator, 'plugins', {
             get: () => mockPlugins
           });
-        }
+
+          const mockMimeType = {
+            type: "application/x-shockwave-flash",
+            suffixes: "swf",
+            description: "Shockwave Flash",
+            enabledPlugin: mockFlashPlugin
+          };
+
+          const mockMimeTypes = {
+            "application/x-shockwave-flash": mockMimeType,
+            length: 1,
+            item: function(index) { return mockMimeType; },
+            namedItem: function(name) { return mockMimeType; }
+          };
+          mockMimeTypes[0] = mockMimeType;
+
+          Object.defineProperty(navigator, 'mimeTypes', {
+            get: () => mockMimeTypes
+          });
+
+          // 注入 mock 版本的 swfobject.getFlashPlayerVersion 预热以绕过特定的 JS 库检测
+          window.swfobject = window.swfobject || {};
+          window.swfobject.getFlashPlayerVersion = function() {
+            return { major: 32, minor: 0, release: 0 };
+          };
+        } catch (e) {}
 
         // 5. 自动载入 Ruffle Flash 仿真引擎，无缝支持 4399 等 Flash 小游戏
         try {
