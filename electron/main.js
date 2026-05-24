@@ -596,6 +596,7 @@ function createTabView(win, tabId, url, isPrivate) {
       preload: path.join(__dirname, 'webview-preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      nodeIntegrationInSubFrames: true, // 确保 preload 脚本能完美注入到 subframe/iframe 子框架中运行，以实现 4399 游戏播放器的 Flash 仿真与遮罩剔除
       sandbox: false,
       session: sess
     }
