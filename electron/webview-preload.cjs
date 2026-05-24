@@ -222,6 +222,68 @@ try {
               });
             }
           } catch (e) {}
+
+          // 6. 自动化屏蔽/剔除 4399 等小游戏站点中由于前端异步检测可能产生的“不支持”或“推荐下载”拦截遮罩层，保障底层 Flash/Ruffle 游戏界面完美呈现
+          try {
+            const hideFlashBanners = () => {
+              // 4399 等站点常见的阻断弹窗与遮罩元素特征 ID 和 Class
+              const selectors = [
+                '#error_tips', '#error-tips', '#flash-tips', '.flash-tips', '.p-tips', '.p-mask', '.p-box',
+                '.no-flash-tip', '.flash-tip', '.flash-upgrade', '.flash_upgrade', '#p_player_mask', '#p_player_tips'
+              ];
+              selectors.forEach(sel => {
+                try {
+                  const nodes = document.querySelectorAll(sel);
+                  nodes.forEach(node => {
+                    node.style.setProperty('display', 'none', 'important');
+                    node.style.setProperty('visibility', 'hidden', 'important');
+                    node.style.setProperty('opacity', '0', 'important');
+                    node.style.setProperty('z-index', '-9999', 'important');
+                    node.style.setProperty('pointer-events', 'none', 'important');
+                  });
+                } catch(e) {}
+              });
+
+              // 递归向上遍历 DOM 并隐藏包含特定关键字的容器
+              const walker = document.createTreeWalker(
+                document.body || document.documentElement,
+                NodeFilter.SHOW_TEXT,
+                null,
+                false
+              );
+              let node;
+              while (node = walker.nextNode()) {
+                const txt = node.textContent;
+                if (txt && (txt.includes('当前浏览器或模式不支持') || txt.includes('请下载Flash官方插件') || txt.includes('其他浏览器（如：Google Chrome'))) {
+                  let parent = node.parentElement;
+                  let depth = 0;
+                  while (parent && parent !== document.body && parent !== document.documentElement && depth < 5) {
+                    const style = window.getComputedStyle(parent);
+                    if (style.position === 'fixed' || style.position === 'absolute' || parent.tagName === 'DIV') {
+                      parent.style.setProperty('display', 'none', 'important');
+                      parent.style.setProperty('visibility', 'hidden', 'important');
+                      parent.style.setProperty('pointer-events', 'none', 'important');
+                    }
+                    parent = parent.parentElement;
+                    depth++;
+                  }
+                  node.parentElement.style.setProperty('display', 'none', 'important');
+                }
+              }
+            };
+
+            // 尽早在 DOM 生成时处理
+            if (document.body || document.documentElement) hideFlashBanners();
+
+            // 监听动态加载出来的遮罩层
+            const observer = new MutationObserver(hideFlashBanners);
+            observer.observe(document.documentElement, { childList: true, subtree: true });
+
+            // 兼容各种加载阶段
+            window.addEventListener('DOMContentLoaded', hideFlashBanners);
+            window.addEventListener('load', hideFlashBanners);
+            setInterval(hideFlashBanners, 500); // 兜底轮询
+          } catch(e) {}
         }
       } catch (e) {}
     })();

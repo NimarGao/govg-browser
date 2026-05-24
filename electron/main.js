@@ -293,8 +293,9 @@ function registerBlockerOnSession(sess) {
   const FLASH_UA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36 QIHU 360EE";
   sess.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
     try {
-      const settings = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
-      if (settings.flashMode) {
+      const settings = store.get('settings') || {};
+      const isFlashMode = settings.flashMode !== false;
+      if (isFlashMode) {
         const url = new URL(details.url);
         const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(url.hostname);
         if (isFlashSite) {
@@ -308,9 +309,10 @@ function registerBlockerOnSession(sess) {
   // 拦截并优化 CSP 头部，安全豁免 Ruffle.js 所需的 CDN (unpkg.com 和 cdn.jsdelivr.net) 及 blob: 协议，保障 Flash 仿真引擎在所有网站中完美运行
   sess.webRequest.onHeadersReceived(filter, (details, callback) => {
     const responseHeaders = { ...details.responseHeaders };
-    const settings = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
+    const settings = store.get('settings') || {};
+    const isFlashMode = settings.flashMode !== false;
     
-    if (settings.flashMode) {
+    if (isFlashMode) {
       const cspKey = Object.keys(responseHeaders).find(k => k.toLowerCase() === 'content-security-policy');
       if (cspKey) {
         const cspValues = responseHeaders[cspKey];
@@ -542,18 +544,27 @@ ipcMain.handle('quicklinks:remove', (_event, id) => {
   return next;
 });
 
-ipcMain.handle('settings:get', () => store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true }));
+ipcMain.handle('settings:get', () => {
+  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
+  if (current.flashMode === undefined) {
+    current.flashMode = true;
+  }
+  return current;
+});
 
 ipcMain.handle('settings:set', (_event, patch) => {
   const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
+  if (current.flashMode === undefined) {
+    current.flashMode = true;
+  }
   const next = { ...current, ...patch };
   store.set('settings', next);
   return next;
 });
 
 ipcMain.on('settings:get-flash-mode-sync', (event) => {
-  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
-  event.returnValue = !!current.flashMode;
+  const current = store.get('settings') || {};
+  event.returnValue = current.flashMode !== false;
 });
 
 ipcMain.handle('session:clear-all-data', async () => {
