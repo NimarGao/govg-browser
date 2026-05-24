@@ -43,7 +43,7 @@
 ## 修改文件详情
 
 1.  **package.json**：
-    *   版本号已升级至 `0.3.2`。
+    *   版本号已升级至 `0.3.3`。
 2.  **electron/main.js**：
     *   在头部定义 `STANDARD_UA` 并应用到所有新建的会话中；
     *   屏蔽 `AutomationControlled` 自动化命令行参数；

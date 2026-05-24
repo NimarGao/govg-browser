@@ -1147,8 +1147,8 @@ button {
 
 .window-controls.macos-style .mac-btn {
   position: relative;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border-radius: 50%;
   border: none;
   padding: 0;
@@ -1167,42 +1167,6 @@ button {
 }
 .window-controls.macos-style .mac-btn.maximize {
   background-color: #27c93f;
-}
-
-/* 圆点内部的控制图标符号 (默认半透明微弱显示，移入时完全显示) */
-.window-controls.macos-style .mac-btn::before {
-  position: absolute;
-  color: rgba(0, 0, 0, 0.65);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-weight: 700;
-  line-height: 1;
-  opacity: 0.45;
-  transition: opacity 0.15s ease, color 0.15s ease;
-}
-
-.window-controls.macos-style:hover .mac-btn::before {
-  opacity: 0.8;
-}
-
-.window-controls.macos-style .mac-btn:hover::before {
-  opacity: 1;
-  color: rgba(0, 0, 0, 0.9);
-}
-
-.window-controls.macos-style .mac-btn.close::before {
-  content: "×";
-  font-size: 11px;
-  top: 1px;
-}
-.window-controls.macos-style .mac-btn.minimize::before {
-  content: "─";
-  font-size: 8px;
-  top: 2px;
-}
-.window-controls.macos-style .mac-btn.maximize::before {
-  content: "+";
-  font-size: 10px;
-  top: 1px;
 }
 
 /* 按下效果 */

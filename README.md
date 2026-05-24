@@ -73,5 +73,5 @@ npm run dist
 │   └── styles.css           # 界面样式与 mac 交通灯布局
 ├── index.html               # Vite 入口
 ├── vite.config.js           # Vite 配置
-└── package.json             # 项目与打包配置 (当前版本 0.3.2)
+└── package.json             # 项目与打包配置 (当前版本 0.3.3)
 ```
