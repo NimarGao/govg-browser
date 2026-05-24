@@ -1,4 +1,4 @@
-# Govg Browser 提升任务跟踪 - 第四阶段优化与功能还原 (v0.3.7)
+# Govg Browser 提升任务跟踪 - 第四阶段优化与功能还原 (v0.3.8)
 
 - `[x]` 1. 前端 React 控制层与 UI 还原 (v0.3.1)
   - `[x]` 简化 `navigate` 接口并清除右侧导航参数
@@ -20,7 +20,10 @@
 - `[x]` 6. Flash 插件 Shockwave 插件环境伪装与 SWFObject 深度绕过 (v0.3.7)
   - `[x]` 在 `webview-preload.cjs` 首屏运行环境中，使用 `Object.defineProperty` 为 `navigator.plugins` 与 `navigator.mimeTypes` 深度写入符合 Shockwave Flash 的插件及 MimeType 参数，使其具备 100% 真实 Flash 环境的物理指纹
   - `[x]` 重写全局 `window.swfobject.getFlashPlayerVersion` 钩子，使其 100% 返回 `{ major: 32, minor: 0, release: 0 }` 版本指纹，彻底绕过 4399 等网站前置的“检测未安装 Flash”拦截，成功放行 DOM 生成以配合 Ruffle 仿真
-- `[x]` 7. 版本与文档发布 (v0.3.7)
-  - `[x]` 在 [package.json](file:///D:/ai/bs/package.json) 中更新版本号为 `0.3.7`
+- `[x]` 7. 智能域名 360 极速浏览器 HTTP/DOM 双重 User-Agent 伪装 (v0.3.8)
+  - `[x]` 在 `webview-preload.cjs` 中智能匹配 Flash 游戏站点，在主世界中将 `navigator.userAgent` 和 `navigator.appVersion` 覆盖为 360 极速浏览器代理字串
+  - `[x]` 在 `main.js` 的 `onBeforeSendHeaders` 网络拦截中，智能对 Flash 游戏站点的 HTTP 发送请求头重写 User-Agent 为 360 极速浏览器特有标识，完美破除 4399 等网站前置的“强制不支持高版本 Chrome 浏览器”拦截
+- `[x]` 8. 版本与文档发布 (v0.3.8)
+  - `[x]` 在 [package.json](file:///D:/ai/bs/package.json) 中更新版本号为 `0.3.8`
   - `[x]` 同步更新 `README.md`、`WALKTHROUGH.md` 及 `TASK.md` 中的版本和修改说明
   - `[x]` 使用规范的中文注释执行 Git 提交并推送至远端仓库

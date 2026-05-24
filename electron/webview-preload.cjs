@@ -11,6 +11,20 @@ try {
           });
         }
 
+        // 1.5 针对 Flash 小游戏站点 (如 4399/7k7k 等) 自动伪装支持 Flash 的 360 浏览器 User-Agent，绕过其对现代 Chrome 的强制拦截
+        try {
+          const isFlashSite = /4399|7k7k|2144|flash|game/i.test(window.location.hostname);
+          if (isFlashSite) {
+            const mockUA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36 QIHU 360EE";
+            Object.defineProperty(navigator, 'userAgent', {
+              get: () => mockUA
+            });
+            Object.defineProperty(navigator, 'appVersion', {
+              get: () => mockUA
+            });
+          }
+        } catch (e) {}
+
         // 2. 模拟完整的 window.chrome 属性，避免谷歌等风控校验报错
         const mockChrome = {
           app: {
