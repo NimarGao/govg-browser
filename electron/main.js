@@ -287,6 +287,36 @@ function registerBlockerOnSession(sess) {
       callback({ cancel: false });
     }
   });
+
+  // 拦截并优化 CSP 头部，安全豁免 Ruffle.js 所需的 CDN (unpkg.com) 及 blob: 协议，保障 Flash 仿真引擎在所有网站中完美运行
+  sess.webRequest.onHeadersReceived(filter, (details, callback) => {
+    const responseHeaders = { ...details.responseHeaders };
+    const cspKey = Object.keys(responseHeaders).find(k => k.toLowerCase() === 'content-security-policy');
+    if (cspKey) {
+      const cspValues = responseHeaders[cspKey];
+      if (Array.isArray(cspValues)) {
+        responseHeaders[cspKey] = cspValues.map(val => {
+          let modified = val;
+          // 宽松豁免 unpkg CDN 的 script 和 connect
+          if (modified.includes('script-src') && !modified.includes('https://unpkg.com')) {
+            modified = modified.replace('script-src', "script-src https://unpkg.com 'unsafe-eval' 'unsafe-inline'");
+          }
+          if (modified.includes('connect-src') && !modified.includes('https://unpkg.com')) {
+            modified = modified.replace('connect-src', 'connect-src https://unpkg.com');
+          }
+          if (modified.includes('worker-src') && !modified.includes('blob:')) {
+            modified = modified.replace('worker-src', 'worker-src blob:');
+          } else if (modified.includes('child-src') && !modified.includes('blob:')) {
+            modified = modified.replace('child-src', 'child-src blob:');
+          } else if (!modified.includes('worker-src') && !modified.includes('child-src')) {
+            modified += "; worker-src blob:; child-src blob:";
+          }
+          return modified;
+        });
+      }
+    }
+    callback({ cancel: false, responseHeaders });
+  });
 }
 
 function installRequestBlocker() {

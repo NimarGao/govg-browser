@@ -141,6 +141,14 @@ try {
             get: () => mockPlugins
           });
         }
+
+        // 5. 自动载入 Ruffle Flash 仿真引擎，无缝支持 4399 等 Flash 小游戏
+        try {
+          const ruffleScript = document.createElement('script');
+          ruffleScript.src = 'https://unpkg.com/@ruffle-rs/ruffle';
+          ruffleScript.async = true;
+          document.head.appendChild(ruffleScript);
+        } catch (e) {}
       } catch (e) {}
     })();
   `;
