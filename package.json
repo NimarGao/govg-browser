@@ -1,6 +1,6 @@
 {
   "name": "govg-browser",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "A Windows browser built with React and Electron.",
   "author": "Local",
   "main": "electron/main.js",
@@ -43,6 +43,7 @@
     "asar": true,
     "electronDist": "node_modules/electron/dist",
     "win": {
+      "icon": "build/icon.png",
       "target": [
         "nsis",
         "portable"

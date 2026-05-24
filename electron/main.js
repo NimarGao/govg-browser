@@ -103,6 +103,7 @@ function createWindow() {
     show: false,
     backgroundColor: '#f6f7f9',
     title: 'Govg Browser',
+    icon: path.join(__dirname, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
