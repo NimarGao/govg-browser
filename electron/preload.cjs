@@ -57,5 +57,10 @@ contextBridge.exposeInMainWorld('browserAPI', {
     const listener = (_event, tabId, eventName, details) => callback(tabId, eventName, details);
     ipcRenderer.on('views:event', listener);
     return () => ipcRenderer.removeListener('views:event', listener);
+  },
+  onExternalAuthOpened: (callback) => {
+    const listener = (_event, details) => callback(details);
+    ipcRenderer.on('security:external-auth-opened', listener);
+    return () => ipcRenderer.removeListener('security:external-auth-opened', listener);
   }
 });

@@ -3,11 +3,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Store from 'electron-store';
 
-app.commandLine.appendSwitch('disable-site-isolation');
-app.commandLine.appendSwitch('allow-running-insecure-content');
-app.commandLine.appendSwitch('disable-features', 'BlockInsecurePrivateNetworkRequests');
-
-const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 GovgBrowser/0.4.3';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -26,8 +21,7 @@ const store = new Store({
     ],
     settings: {
       defaultSearchEngine: 'bing',
-      startupUrl: 'swift://newtab',
-      flashMode: true
+      startupUrl: 'swift://newtab'
     }
   }
 });
@@ -96,6 +90,51 @@ function normalizeOrigin(rawUrl) {
   }
 }
 
+function parseUrl(rawUrl) {
+  try {
+    return new URL(rawUrl);
+  } catch {
+    return null;
+  }
+}
+
+function isGoogleAccountHost(hostname) {
+  const host = hostname.toLowerCase();
+  return host === 'accounts.google.com' || host === 'myaccount.google.com';
+}
+
+function isGoogleAuthUrl(rawUrl) {
+  const parsed = parseUrl(rawUrl);
+  if (!parsed) return false;
+
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname.toLowerCase();
+
+  if (isGoogleAccountHost(host)) return true;
+  if (host === 'www.google.com' && (
+    path.startsWith('/accounts') ||
+    path.startsWith('/signin') ||
+    path.startsWith('/o/oauth') ||
+    path.startsWith('/oauth') ||
+    path.startsWith('/gsi/')
+  )) return true;
+
+  return false;
+}
+
+function openGoogleAuthExternally(rawUrl, win) {
+  if (!isGoogleAuthUrl(rawUrl)) return false;
+  shell.openExternal(rawUrl);
+  if (win) {
+    win.webContents.send('security:external-auth-opened', {
+      provider: 'Google',
+      url: rawUrl,
+      reason: 'Google 账号登录不能在嵌入式浏览器中安全完成，已转到系统默认浏览器。'
+    });
+  }
+  return true;
+}
+
 function createWindow() {
   const win = new BrowserWindow({
     width: 1280,
@@ -116,7 +155,6 @@ function createWindow() {
     }
   });
 
-  win.webContents.setUserAgent(STANDARD_UA);
   win.once('ready-to-show', () => win.show());
 
   if (isDev) {
@@ -126,6 +164,9 @@ function createWindow() {
   }
 
   win.webContents.setWindowOpenHandler(({ url }) => {
+    if (openGoogleAuthExternally(url, win)) {
+      return { action: 'deny' };
+    }
     if (url.startsWith('http://') || url.startsWith('https://')) {
       win.webContents.send('browser:new-tab', url);
       return { action: 'deny' };
@@ -144,6 +185,9 @@ function installNewTabHandler() {
 
     contents.setWindowOpenHandler(({ url }) => {
       const owner = BrowserWindow.getAllWindows()[0];
+      if (openGoogleAuthExternally(url, owner)) {
+        return { action: 'deny' };
+      }
       if (owner && (url.startsWith('http://') || url.startsWith('https://'))) {
         owner.webContents.send('browser:new-tab', url, contents.isOffTheRecord());
         return { action: 'deny' };
@@ -292,35 +336,7 @@ function registerBlockerOnSession(sess) {
   });
 
 
-  // 拦截并优化 CSP 头部，安全豁免 Ruffle.js 所需的 CDN (unpkg.com 和 cdn.jsdelivr.net) 及 blob: 协议，保障 Flash 仿真引擎在所有网站中完美运行
-  sess.webRequest.onHeadersReceived(filter, (details, callback) => {
-    const responseHeaders = { ...details.responseHeaders };
-    const settings = store.get('settings') || {};
-    const isFlashMode = settings.flashMode !== false;
-    
-    if (isFlashMode) {
-      // 强效注入 CORS 响应头部，防止 Ruffle 引擎在加载跨域 .swf 游戏资源包时发生跨域阻断/一直在加载中卡死
-      const headerKeys = Object.keys(responseHeaders);
-      const corsOriginKey = headerKeys.find(k => k.toLowerCase() === 'access-control-allow-origin') || 'Access-Control-Allow-Origin';
-      responseHeaders[corsOriginKey] = ['*'];
-      
-      const corsMethodsKey = headerKeys.find(k => k.toLowerCase() === 'access-control-allow-methods') || 'Access-Control-Allow-Methods';
-      responseHeaders[corsMethodsKey] = ['GET', 'POST', 'OPTIONS', 'HEAD'];
-      
-      const corsHeadersKey = headerKeys.find(k => k.toLowerCase() === 'access-control-allow-headers') || 'Access-Control-Allow-Headers';
-      responseHeaders[corsHeadersKey] = ['*'];
 
-      // 彻底卸载任何可能导致 Ruffle 引擎、WebAssembly 或跨域网络请求受限的 CSP 限制，实现最顺畅的沙箱穿越
-      const cspKeys = Object.keys(responseHeaders).filter(k => {
-        const lower = k.toLowerCase();
-        return lower === 'content-security-policy' || lower === 'content-security-policy-report-only';
-      });
-      cspKeys.forEach(k => {
-        delete responseHeaders[k];
-      });
-    }
-    callback({ cancel: false, responseHeaders });
-  });
 }
 
 function installRequestBlocker() {
@@ -328,7 +344,6 @@ function installRequestBlocker() {
 }
 
 app.whenReady().then(() => {
-  session.defaultSession.setUserAgent(STANDARD_UA);
   app.setAppUserModelId('com.nimargao.govgbrowser');
   Menu.setApplicationMenu(null);
   installNewTabHandler();
@@ -515,26 +530,14 @@ ipcMain.handle('quicklinks:remove', (_event, id) => {
 });
 
 ipcMain.handle('settings:get', () => {
-  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
-  if (current.flashMode === undefined) {
-    current.flashMode = true;
-  }
-  return current;
+  return store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab' });
 });
 
 ipcMain.handle('settings:set', (_event, patch) => {
-  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
-  if (current.flashMode === undefined) {
-    current.flashMode = true;
-  }
+  const current = store.get('settings', { defaultSearchEngine: 'bing', startupUrl: 'swift://newtab' });
   const next = { ...current, ...patch };
   store.set('settings', next);
   return next;
-});
-
-ipcMain.on('settings:get-flash-mode-sync', (event) => {
-  const current = store.get('settings') || {};
-  event.returnValue = current.flashMode !== false;
 });
 
 ipcMain.handle('session:clear-all-data', async () => {
@@ -560,6 +563,16 @@ function bindTabViewEvents(win, tabId, view, isPrivate) {
 
   wc.on('console-message', (event, level, message, line, sourceId) => {
     console.log(`[TAB ${tabId} CONSOLE] [Level ${level}] ${message} (Source: ${sourceId}:${line})`);
+  });
+
+  wc.on('will-navigate', (event, url) => {
+    if (openGoogleAuthExternally(url, win)) {
+      event.preventDefault();
+      win.webContents.send('views:event', tabId, 'auth-redirected', {
+        provider: 'Google',
+        url
+      });
+    }
   });
 
   wc.on('did-start-loading', () => {
@@ -609,6 +622,9 @@ function bindTabViewEvents(win, tabId, view, isPrivate) {
   });
 
   wc.setWindowOpenHandler(({ url }) => {
+    if (openGoogleAuthExternally(url, win)) {
+      return { action: 'deny' };
+    }
     if (url.startsWith('http://') || url.startsWith('https://')) {
       win.webContents.send('browser:new-tab', url, isPrivate);
       return { action: 'deny' };
@@ -654,107 +670,23 @@ function bindTabViewEvents(win, tabId, view, isPrivate) {
     ]);
     menu.popup();
   });
-
-  // 动态安全沙箱拦截监听器
-  const handleSandboxNavigationCheck = (event, targetUrl) => {
-    const wcPreferences = wc.getLastWebPreferences();
-    const currentWebSecurity = wcPreferences ? wcPreferences.webSecurity : true;
-    
-    const settings = store.get('settings') || {};
-    const isFlashMode = settings.flashMode !== false;
-    const isNewFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(targetUrl || '');
-    const targetWebSecurity = !(isFlashMode && isNewFlashSite);
-
-    if (currentWebSecurity !== targetWebSecurity) {
-      event.preventDefault();
-      console.log(`[Govg Sandbox Router] Navigating to ${targetUrl}. Recreating WebContentsView for sandbox transition: ${currentWebSecurity} -> ${targetWebSecurity}`);
-      
-      process.nextTick(() => {
-        recreateTabViewWithSandbox(win, tabId, targetUrl, isPrivate, targetWebSecurity);
-      });
-    }
-  };
-
-  wc.on('will-navigate', handleSandboxNavigationCheck);
-  wc.on('will-redirect', handleSandboxNavigationCheck);
-}
-
-function recreateTabViewWithSandbox(win, tabId, url, isPrivate, useWebSecurity) {
-  const tv = tabViews.get(tabId);
-  if (!tv) return;
-
-  const oldView = tv.view;
-  let oldBounds = null;
-  try {
-    oldBounds = oldView.getBounds();
-  } catch {}
-
-  try {
-    win.contentView.removeChildView(oldView);
-  } catch {}
-  
-  // 优雅异步销毁旧的 WebContents，释放系统资源
-  try {
-    oldView.webContents.destroy();
-  } catch {}
-  tabViews.delete(tabId);
-
-  const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
-  sess.setUserAgent(STANDARD_UA);
-
-  const newView = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, 'webview-preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      nodeIntegrationInSubFrames: true,
-      sandbox: false,
-      webSecurity: useWebSecurity,
-      allowRunningInsecureContent: !useWebSecurity,
-      session: sess
-    }
-  });
-
-  tabViews.set(tabId, {
-    view: newView,
-    isPrivate,
-    zoomLevel: tv.zoomLevel
-  });
-
-  if (oldBounds) {
-    newView.setBounds(oldBounds);
-  }
-
-  try {
-    win.contentView.addChildView(newView);
-  } catch {}
-
-  bindTabViewEvents(win, tabId, newView, isPrivate);
-
-  win.webContents.send('views:event', tabId, 'did-navigate', { url });
-  newView.webContents.loadURL(url).catch(() => {});
 }
 
 function createTabView(win, tabId, url, isPrivate) {
   const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
-  sess.setUserAgent(STANDARD_UA);
   registerBlockerOnSession(sess);
   registerDownloadOnSession(sess);
 
-  const settings = store.get('settings') || {};
-  const isFlashMode = settings.flashMode !== false;
-  const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(url || '');
-  const useWebSecurity = !(isFlashMode && isFlashSite);
-
+  // 100% 官方正规极简纯净浏览器：强制完全开启 webSecurity 同源沙箱并禁用 allowRunningInsecureContent 混合内容放行
   const view = new WebContentsView({
     webPreferences: {
       preload: path.join(__dirname, 'webview-preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      nodeIntegrationInSubFrames: true,
-      sandbox: false,
-      webSecurity: useWebSecurity,
-      allowRunningInsecureContent: !useWebSecurity,
+      nodeIntegrationInSubFrames: false, // 纯净模式下不需要注入 subframe
+      sandbox: true, // 开启原生沙箱，实现最高级别安全隔离！
+      webSecurity: true, // 100% 官方闭合同源安全！
+      allowRunningInsecureContent: false, // 100% 官方严格禁止混合内容！
       session: sess
     }
   });
@@ -767,7 +699,7 @@ function createTabView(win, tabId, url, isPrivate) {
 
   bindTabViewEvents(win, tabId, view, isPrivate);
 
-  if (url && url !== 'swift://newtab') {
+  if (url && url !== 'swift://newtab' && !openGoogleAuthExternally(url, win)) {
     view.webContents.loadURL(url).catch(() => {});
   }
 }
@@ -823,6 +755,8 @@ ipcMain.handle('views:set-bounds', (event, tabId, bounds) => {
 ipcMain.handle('views:load-url', (event, tabId, url) => {
   const tv = tabViews.get(tabId);
   if (tv && url && url !== 'swift://newtab') {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (openGoogleAuthExternally(url, win)) return;
     tv.view.webContents.loadURL(url).catch(() => {});
   }
 });

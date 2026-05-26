@@ -1,29 +1,26 @@
-# Govg Browser 提升任务跟踪 - 第四阶段优化与功能还原 (v0.3.8)
+# Govg Browser 安全整改任务跟踪 (v0.5.1)
 
-- `[x]` 1. 前端 React 控制层与 UI 还原 (v0.3.1)
-  - `[x]` 简化 `navigate` 接口并清除右侧导航参数
-  - `[x]` 简化 `handleBrowserShortcut` 缩放快捷键逻辑，仅处理单个视图
-  - `[x]` 重构 View 生命周期绑定，以 `tab.id` 为单 View 键值
-  - `[x]` 移除顶部 toolbar 的“双屏分屏”按钮及 `Columns` 图标，还原单占位面板容器
-- `[x]` 2. 样式表清理 (v0.3.1)
-  - `[x]` 彻底清除 [styles.css](file:///D:/ai/bs/src/styles.css) 尾部追加的双屏网格、右分屏工具栏及地址栏的所有 CSS 规则
-- `[x]` 3. 右上角控制圆点排序与尺寸优化 (v0.3.2 - v0.3.3)
-  - `[x]` 调整三个控制按钮的顺序为：最小化、最大化、关闭（符合 Windows 习惯）
-  - `[x]` 将圆点内的符号字符相关样式和伪元素完全移除，呈现为标准的 `12px` 纯色圆点
-- `[x]` 4. 设计并配置全新的应用程序图标 (v0.3.4 - v0.3.5)
-  - `[x]` 绘制红底白字 G 字母的现代化应用图标，剥离四周背景多余色实现纯透明圆角
-  - `[x]` 整合配置为 `build/icon.png` 与 `electron/icon.png` 优化桌面与任务栏图标渲染
-  - `[x]` 修改 `package.json` 中的 `build.win.icon` 配置以指定新的图标路径
-- `[x]` 5. 内置 Ruffle Flash 仿真引擎与 CSP 豁免拦截 (v0.3.6)
-  - `[x]` 在 `webview-preload.cjs` 中全局异步载入 `unpkg.com` 的 Ruffle 仿真脚本，在 DOM 载入时自动替换 Flash 元素为 HTML5 WebAssembly 渲染
-  - `[x]` 在 `main.js` 的 `onHeadersReceived` 网络监听中，对 CSP 头部中 unpkg.com 及 blob: 协议安全豁免信任，无缝在各大网站支持播放 4399 等 Flash 怀旧小游戏，无需手动安装插件
-- `[x]` 6. Flash 插件 Shockwave 插件环境伪装与 SWFObject 深度绕过 (v0.3.7)
-  - `[x]` 在 `webview-preload.cjs` 首屏运行环境中，使用 `Object.defineProperty` 为 `navigator.plugins` 与 `navigator.mimeTypes` 深度写入符合 Shockwave Flash 的插件及 MimeType 参数，使其具备 100% 真实 Flash 环境的物理指纹
-  - `[x]` 重写全局 `window.swfobject.getFlashPlayerVersion` 钩子，使其 100% 返回 `{ major: 32, minor: 0, release: 0 }` 版本指纹，彻底绕过 4399 等网站前置的“检测未安装 Flash”拦截，成功放行 DOM 生成以配合 Ruffle 仿真
-- `[x]` 7. 智能域名 360 极速浏览器 HTTP/DOM 双重 User-Agent 伪装 (v0.3.8)
-  - `[x]` 在 `webview-preload.cjs` 中智能匹配 Flash 游戏站点，在主世界中将 `navigator.userAgent` 和 `navigator.appVersion` 覆盖为 360 极速浏览器代理字串
-  - `[x]` 在 `main.js` 的 `onBeforeSendHeaders` 网络拦截中，智能对 Flash 游戏站点的 HTTP 发送请求头重写 User-Agent 为 360 极速浏览器特有标识，完美破除 4399 等网站前置的“强制不支持高版本 Chrome 浏览器”拦截
-- `[x]` 8. 版本与文档发布 (v0.3.8)
-  - `[x]` 在 [package.json](file:///D:/ai/bs/package.json) 中更新版本号为 `0.3.8`
-  - `[x]` 同步更新 `README.md`、`WALKTHROUGH.md` 及 `TASK.md` 中的版本和修改说明
-  - `[x]` 使用规范的中文注释执行 Git 提交并推送至远端仓库
+- `[x]` 1. Google 账号认证护栏
+  - `[x]` 识别 `accounts.google.com`、`myaccount.google.com`、Google 登录页和 OAuth 路径。
+  - `[x]` 在应用内视图中阻止 Google 账号登录流程继续加载。
+  - `[x]` 自动调用系统默认浏览器打开 Google 认证链接。
+
+- `[x]` 2. 移除浏览器身份伪装方向
+  - `[x]` 删除固定 Chrome User-Agent 覆写逻辑。
+  - `[x]` 不再把 Govg Browser 包装成标准 Chrome。
+  - `[x]` 文档中明确禁止通过指纹伪装、自动化隐藏等方式规避风控。
+
+- `[x]` 3. 密码保存降风险
+  - `[x]` Google 账号认证页面不触发密码表单捕获。
+  - `[x]` 无痕标签页继续禁用密码保存提示。
+  - `[x]` 普通站点的保存密码功能保留，但不覆盖高风险身份认证页面。
+
+- `[x]` 4. 文档同步
+  - `[x]` README 增加 Google 账号登录说明。
+  - `[x]` WALKTHROUGH 改为安全整改报告。
+  - `[x]` TASK 改为安全整改任务记录。
+
+- `[ ]` 5. 后续建议
+  - `[ ]` 为更多身份提供商增加同类外部浏览器护栏，例如 Microsoft、Apple、GitHub。
+  - `[ ]` 增加“账号安全模式”开关，默认禁止保存任何登录密码。
+  - `[ ]` 在设置页增加安全说明和清理认证相关 Cookie 的快捷入口。

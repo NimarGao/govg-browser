@@ -9,267 +9,20 @@ try {
   // 捕获在跨域沙箱子框架 iframe 中 require('electron') 抛出的安全限制异常，防止脚本崩溃中断执行
 }
 
-let isFlashModeEnabled = true;
-if (ipcRenderer) {
-  try {
-    isFlashModeEnabled = ipcRenderer.sendSync('settings:get-flash-mode-sync');
-  } catch (e) {
-    console.error('Failed to get flash mode status:', e);
-  }
-}
+function isSensitiveAuthPage() {
+  const host = location.hostname.toLowerCase();
+  const path = location.pathname.toLowerCase();
 
-try {
-  const antidetectScript = `
-    (function() {
-      try {
-        if (${isFlashModeEnabled}) {
-          // 1. 原型链多媒体交互兜底：在 HTMLObjectElement/HTMLEmbedElement 的 prototype 上注入 checkflash 恒返回 1 以消除 4399 前端报错
-          try {
-            Object.defineProperty(HTMLObjectElement.prototype, 'checkflash', {
-              get: () => function() { return 1; },
-              configurable: true
-            });
-            Object.defineProperty(HTMLEmbedElement.prototype, 'checkflash', {
-              get: () => function() { return 1; },
-              configurable: true
-            });
+  if (host === 'accounts.google.com' || host === 'myaccount.google.com') return true;
+  if (host === 'www.google.com' && (
+    path.startsWith('/accounts') ||
+    path.startsWith('/signin') ||
+    path.startsWith('/o/oauth') ||
+    path.startsWith('/oauth') ||
+    path.startsWith('/gsi/')
+  )) return true;
 
-            // 积分小游戏交互方法 mock，防止 AS 脚本交互崩溃
-            const mockMethods = ['submitscore', 'linkAs3', 'cutshot', 'toggleSound', 'toggleGame'];
-            mockMethods.forEach(method => {
-              if (!HTMLObjectElement.prototype[method]) {
-                HTMLObjectElement.prototype[method] = function() { return 0; };
-              }
-              if (!HTMLEmbedElement.prototype[method]) {
-                HTMLEmbedElement.prototype[method] = function() { return 0; };
-              }
-            });
-          } catch (e) {}
-
-          // 2. 全局拦截防线：使用 Object.defineProperty 的 getter/setter 拦截全局容器销毁方法，彻底免疫 4399 覆盖 swfdiv 游戏容器的行为
-          try {
-            Object.defineProperty(window, 'showBlockFlash', {
-              get: () => function() { console.log('[Govg Defender] showBlockFlash was bypassed cleanly'); },
-              set: (v) => {},
-              configurable: true
-            });
-            Object.defineProperty(window, 'showBlockFlashIE', {
-              get: () => function() { console.log('[Govg Defender] showBlockFlashIE was bypassed cleanly'); },
-              set: (v) => {},
-              configurable: true
-            });
-          } catch (e) {}
-
-          // 3. 自动载入 Ruffle Flash 仿真引擎，无损完成多媒体播放
-          try {
-            // 设置 Ruffle 官方的全局最佳用户体验配置
-            window.RufflePlayer = window.RufflePlayer || {};
-            window.RufflePlayer.config = {
-              "autoplay": "on",
-              "unmuteOverlay": "hidden",
-              "letterbox": "on",
-              "warnOnUnsupportedContent": false,
-              "polyfill": true
-            };
-
-            const ruffleScript = document.createElement('script');
-            // 使用国内极速镜像 JSDMirror 的完整 ruffle.js 浏览器打包路径，确保 100% 成功加载和极速响应，并提供 unpkg.com 作为坚实后盾
-            ruffleScript.src = 'https://cdn.jsdmirror.com/npm/@ruffle-rs/ruffle/ruffle.js';
-            ruffleScript.onerror = () => {
-              const fallback = document.createElement('script');
-              fallback.src = 'https://unpkg.com/@ruffle-rs/ruffle';
-              fallback.async = true;
-              const container = document.head || document.documentElement;
-              if (container) container.appendChild(fallback);
-            };
-            ruffleScript.async = true;
-            
-            // 安全挂载逻辑，优先注入到已存在的主体标签中，避免在 document_start 阶段 document.head 为 null 的问题
-            const container = document.head || document.documentElement;
-            if (container) {
-              container.appendChild(ruffleScript);
-            } else {
-              document.addEventListener('DOMContentLoaded', () => {
-                (document.head || document.documentElement).appendChild(ruffleScript);
-              });
-            }
-
-            // 5.5 【核心突破】强强联手的 SWF 主动捕获接管引擎：周期性扫描 DOM 树并强行秒级渲染 SWF 资源
-            const runRuffleActiveInterceptor = () => {
-              if (!window.RufflePlayer) return;
-              
-              const candidates = document.querySelectorAll('embed, object');
-              candidates.forEach(el => {
-                if (el.getAttribute('data-ruffle-intercepted') === 'true') return;
-                
-                let swfUrl = null;
-                if (el.tagName.toLowerCase() === 'embed') {
-                  swfUrl = el.getAttribute('src');
-                } else if (el.tagName.toLowerCase() === 'object') {
-                  swfUrl = el.getAttribute('data');
-                  if (!swfUrl) {
-                    const movieParam = el.querySelector('param[name="movie"]');
-                    if (movieParam) swfUrl = movieParam.getAttribute('value');
-                  }
-                  if (!swfUrl) {
-                    const srcParam = el.querySelector('param[name="src"]');
-                    if (srcParam) swfUrl = srcParam.getAttribute('value');
-                  }
-                }
-                
-                // 深度提取属性中隐藏的 swf url 兜底
-                if (!swfUrl) {
-                  const attrs = el.attributes;
-                  for (let i = 0; i < attrs.length; i++) {
-                    if (/\.swf/i.test(attrs[i].value)) {
-                      swfUrl = attrs[i].value;
-                      break;
-                    }
-                  }
-                }
-                
-                if (swfUrl) {
-                  el.setAttribute('data-ruffle-intercepted', 'true');
-                  try {
-                    const ruffle = window.RufflePlayer.newest();
-                    if (ruffle) {
-                      const player = ruffle.createPlayer();
-                      
-                      // 完美克隆并应用原有节点的所有尺寸和 CSS 属性
-                      player.style.width = el.style.width || el.getAttribute('width') || '100%';
-                      player.style.height = el.style.height || el.getAttribute('height') || '100%';
-                      if (el.id) player.id = el.id;
-                      if (el.className) player.className = el.className;
-                      
-                      player.style.display = 'block';
-                      player.style.visibility = 'visible';
-                      
-                      // 主动进行 DOM 的替换，杜绝 Chromium 原生 embed 失效引发的加载卡死
-                      const parent = el.parentNode;
-                      if (parent) {
-                        parent.replaceChild(player, el);
-                        
-                        // 强制拉起 Ruffle SWF 装载
-                        player.load({
-                          url: swfUrl,
-                          allowScriptAccess: true
-                        });
-                        console.log('[Govg Active Ruffle] Hijacked embed/object successfully. URL:', swfUrl);
-                      }
-                    }
-                  } catch (err) {
-                    console.error('[Govg Active Ruffle] Hijack failed:', err);
-                  }
-                }
-              });
-            };
-
-            // 高频 250ms 主动触发扫描，确保无论页面以何种异步 JS 渲染，均能即刻秒杀接管
-            setInterval(runRuffleActiveInterceptor, 250);
-            window.addEventListener('DOMContentLoaded', runRuffleActiveInterceptor);
-            window.addEventListener('load', runRuffleActiveInterceptor);
-          } catch (e) {}
-
-          // 6. 自动化屏蔽/剔除 4399 等小游戏站点中由于前端检测可能产生的拦截遮罩层，保障底层 Ruffle 游戏界面完美呈现
-          try {
-            // A. 先注入一层强效全局 CSS 规则，确保哪怕元素是异步渲染出来的，浏览器也能在瞬间隐藏它
-            const style = document.createElement('style');
-            style.innerHTML = `
-              #error_tips, #error-tips, #flash-tips, .flash-tips, .p-tips, .p-mask, .p-box,
-              .no-flash-tip, .flash-tip, .flash-upgrade, .flash_upgrade, #p_player_mask, #p_player_tips {
-                display: none !important;
-                visibility: hidden !important;
-                opacity: 0 !important;
-                pointer-events: none !important;
-                z-index: -9999 !important;
-              }
-            `;
-            const styleContainer = document.head || document.documentElement;
-            if (styleContainer) styleContainer.appendChild(style);
-
-            const hideFlashBanners = () => {
-              // B. 动态覆盖 selectors 样式以确保隐藏
-              const selectors = [
-                '#error_tips', '#error-tips', '#flash-tips', '.flash-tips', '.p-tips', '.p-mask', '.p-box',
-                '.no-flash-tip', '.flash-tip', '.flash-upgrade', '.flash_upgrade', '#p_player_mask', '#p_player_tips'
-              ];
-              selectors.forEach(sel => {
-                try {
-                  const nodes = document.querySelectorAll(sel);
-                  nodes.forEach(node => {
-                    node.style.setProperty('display', 'none', 'important');
-                    node.style.setProperty('visibility', 'hidden', 'important');
-                    node.style.setProperty('pointer-events', 'none', 'important');
-                  });
-                } catch(e) {}
-              });
-
-              // C. 强效 innerText 高频模糊匹配：对包含不支持/插件等关键词的特定弹出容器直接进行爆破屏蔽
-              try {
-                const divs = document.querySelectorAll('div');
-                divs.forEach(div => {
-                  if (div.innerText && (
-                    div.innerText.includes('当前浏览器或模式不支持') || 
-                    div.innerText.includes('请下载Flash官方插件') || 
-                    div.innerText.includes('推荐下载：')
-                  )) {
-                    const style = window.getComputedStyle(div);
-                    if (style.position === 'fixed' || style.position === 'absolute' || div.id.includes('tip') || div.className.includes('tip') || div.id.includes('error')) {
-                      div.style.setProperty('display', 'none', 'important');
-                      div.style.setProperty('visibility', 'hidden', 'important');
-                      div.style.setProperty('pointer-events', 'none', 'important');
-                    }
-                  }
-                });
-              } catch(e) {}
-            };
-
-            // 尽早在 DOM 生成时处理
-            if (document.body || document.documentElement) hideFlashBanners();
-
-            // 监听动态加载出来的遮罩层
-            const observer = new MutationObserver(hideFlashBanners);
-            observer.observe(document.documentElement, { childList: true, subtree: true });
-
-            // 兼容各种加载阶段
-            window.addEventListener('DOMContentLoaded', hideFlashBanners);
-            window.addEventListener('load', hideFlashBanners);
-            setInterval(hideFlashBanners, 200); // 200ms 高频轮询，彻底扫除死角
-          } catch(e) {}
-        }
-      } catch (e) {}
-    })();
-  `;
-
-  if (webFrame) {
-    try {
-      webFrame.executeJavaScript(antidetectScript);
-    } catch (e) {
-      injectViaDOM(antidetectScript);
-    }
-  } else {
-    injectViaDOM(antidetectScript);
-  }
-} catch (e) {}
-
-function injectViaDOM(scriptText) {
-  try {
-    const script = document.createElement('script');
-    script.textContent = scriptText;
-    const container = document.head || document.documentElement;
-    if (container) {
-      container.appendChild(script);
-      script.remove();
-    } else {
-      document.addEventListener('DOMContentLoaded', () => {
-        const c = document.head || document.documentElement;
-        if (c) {
-          c.appendChild(script);
-          script.remove();
-        }
-      });
-    }
-  } catch (e) {}
+  return false;
 }
 
 function getFieldLabel(input) {
@@ -295,6 +48,7 @@ function findUsernameField(form, passwordField) {
 }
 
 function captureForm(form) {
+  if (!ipcRenderer || isSensitiveAuthPage()) return;
   const passwordField = form.querySelector('input[type="password"]');
   if (!passwordField?.value) return;
   const usernameField = findUsernameField(form, passwordField);
@@ -330,9 +84,11 @@ window.addEventListener('keydown', (event) => {
 
   if (isZoomIn || isZoomOut || isZoomReset || isFullscreen) {
     event.preventDefault();
-    ipcRenderer.sendToHost('webview-keydown', {
-      key: event.key,
-      ctrlKey: event.ctrlKey
-    });
+    if (ipcRenderer) {
+      ipcRenderer.sendToHost('webview-keydown', {
+        key: event.key,
+        ctrlKey: event.ctrlKey
+      });
+    }
   }
 }, true);

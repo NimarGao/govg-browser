@@ -479,6 +479,32 @@ button {
   box-shadow: 0 16px 36px rgba(15, 23, 42, 0.18);
 }
 
+.security-notice {
+  position: fixed;
+  right: 18px;
+  top: 104px;
+  z-index: 30;
+  display: grid;
+  gap: 4px;
+  width: min(460px, calc(100vw - 36px));
+  padding: 12px 14px;
+  color: #14213d;
+  background: #fff8df;
+  border: 1px solid #f4d47c;
+  border-radius: 8px;
+  box-shadow: 0 16px 36px rgba(15, 23, 42, 0.16);
+}
+
+.security-notice strong {
+  font-size: 14px;
+}
+
+.security-notice span {
+  color: #6b5b23;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .prompt-icon {
   display: grid;
   place-items: center;
@@ -1173,6 +1199,5 @@ button {
 .window-controls.macos-style .mac-btn:active {
   filter: brightness(0.8);
 }
-
 
 

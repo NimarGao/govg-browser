@@ -93,6 +93,27 @@ function getOriginLabel(url) {
   }
 }
 
+function isSensitiveAuthUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const host = parsed.hostname.toLowerCase();
+    const path = parsed.pathname.toLowerCase();
+
+    if (host === 'accounts.google.com' || host === 'myaccount.google.com') return true;
+    if (host === 'www.google.com' && (
+      path.startsWith('/accounts') ||
+      path.startsWith('/signin') ||
+      path.startsWith('/o/oauth') ||
+      path.startsWith('/oauth') ||
+      path.startsWith('/gsi/')
+    )) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function formatVisitedAt(timestamp) {
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
@@ -253,9 +274,10 @@ function App() {
   const [showDownloads, setShowDownloads] = useState(false);
   const [showPasswords, setShowPasswords] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [settings, setSettings] = useState({ defaultSearchEngine: 'bing', startupUrl: 'swift://newtab', flashMode: true });
+  const [settings, setSettings] = useState({ defaultSearchEngine: 'bing', startupUrl: 'swift://newtab' });
   const [revealedPasswords, setRevealedPasswords] = useState({});
   const [pendingCredential, setPendingCredential] = useState(null);
+  const [securityNotice, setSecurityNotice] = useState(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [bookmarkSearch, setBookmarkSearch] = useState('');
   const [historySearch, setHistorySearch] = useState('');
@@ -333,6 +355,13 @@ function App() {
 
   useEffect(() => {
     return window.browserAPI.onDownloadsUpdated(setDownloads);
+  }, []);
+
+  useEffect(() => {
+    return window.browserAPI.onExternalAuthOpened((details) => {
+      setSecurityNotice(details);
+      window.setTimeout(() => setSecurityNotice(null), 8000);
+    });
   }, []);
 
   const handleBrowserShortcut = useCallback((key, ctrlKey) => {
@@ -475,6 +504,13 @@ function App() {
             url: details.validatedURL
           }
         });
+      } else if (eventName === 'auth-redirected') {
+        setSecurityNotice({
+          provider: details.provider || 'Google',
+          url: details.url,
+          reason: '账号认证已转到系统默认浏览器，避免在嵌入式浏览器中触发账号风控。'
+        });
+        window.setTimeout(() => setSecurityNotice(null), 8000);
       } else if (eventName === 'ipc-message') {
         const { channel, args } = details;
         if (channel === 'credential-captured') {
@@ -482,6 +518,7 @@ function App() {
           const tab = currTabs.find(t => t.id === tabId);
           if (tab && tab.isPrivate) return;
           const credential = args?.[0];
+          if (credential?.url && isSensitiveAuthUrl(credential.url)) return;
           if (credential?.username && credential?.password) setPendingCredential(credential);
         } else if (channel === 'webview-keydown') {
           const { key, ctrlKey } = args?.[0] || {};
@@ -688,21 +725,7 @@ function App() {
         }}>
           <KeyRound size={18} />
         </button>
-        <button
-          className={`icon-button ${settings.flashMode ? 'marked' : ''}`}
-          title={settings.flashMode ? "极速 Flash 模式 (已开启 - 点击关闭)" : "极速 Flash 模式 (已关闭 - 点击开启)"}
-          style={{ position: 'relative' }}
-          onClick={async () => {
-            const nextMode = !settings.flashMode;
-            const next = await window.browserAPI.setSettings({ flashMode: nextMode });
-            setSettings(next);
-            if (activeTab && !isAppHome(activeTab.url)) {
-              window.browserAPI.reloadView(activeTab.id);
-            }
-          }}
-        >
-          <Zap size={18} style={{ color: settings.flashMode ? '#eab308' : 'inherit' }} />
-        </button>
+
         <button className={`icon-button ${showSettings ? 'active' : ''}`} title="设置" onClick={() => {
           setShowSettings((value) => !value);
           setShowBookmarks(false);
@@ -884,26 +907,7 @@ function App() {
                   </select>
                 </div>
 
-                <div className="settings-group" style={{ padding: '4px 0 10px', borderBottom: '1px solid #f1f5f9' }}>
-                  <label className="settings-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', cursor: 'pointer', margin: 0 }}>
-                    <span style={{ fontSize: '13px', fontWeight: '600', color: '#1e293b' }}>启用极速 Flash 模式</span>
-                    <input
-                      type="checkbox"
-                      style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#eab308' }}
-                      checked={!!settings.flashMode}
-                      onChange={async (e) => {
-                        const next = await window.browserAPI.setSettings({ flashMode: e.target.checked });
-                        setSettings(next);
-                        if (activeTab && !isAppHome(activeTab.url)) {
-                          window.browserAPI.reloadView(activeTab.id);
-                        }
-                      }}
-                    />
-                  </label>
-                  <span className="settings-description" style={{ fontSize: '11px', color: '#64748b', marginTop: '6px', display: 'block', lineHeight: '1.5' }}>
-                    开启后，浏览器将无缝集成极速 Ruffle Flash 仿真引擎，并模拟 Shockwave 插件环境，支持直接运行 4399、7k7k 等经典 Flash 网页游戏。
-                  </span>
-                </div>
+
 
                 <div className="settings-group">
                   <label className="settings-label">主页地址 / 启动页</label>
@@ -1011,6 +1015,12 @@ function App() {
         onDismiss={() => setPendingCredential(null)}
         onSave={saveCredential}
       />
+      {securityNotice && (
+        <div className="security-notice">
+          <strong>{securityNotice.provider || '账号'} 登录已转到系统浏览器</strong>
+          <span>{securityNotice.reason}</span>
+        </div>
+      )}
     </main>
   );
 }
