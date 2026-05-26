@@ -555,31 +555,7 @@ ipcMain.handle('session:clear-all-data', async () => {
   }
 });
 
-function createTabView(win, tabId, url, isPrivate) {
-  const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
-  sess.setUserAgent(STANDARD_UA);
-  registerBlockerOnSession(sess);
-  registerDownloadOnSession(sess);
-
-  const view = new WebContentsView({
-    webPreferences: {
-      preload: path.join(__dirname, 'webview-preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      nodeIntegrationInSubFrames: true, // 确保 preload 脚本能完美注入到 subframe/iframe 子框架中运行，以实现 4399 游戏播放器的 Flash 仿真与遮罩剔除
-      sandbox: false,
-      webSecurity: false, // 彻底禁用同源策略与混合内容安全检查，保障 Ruffle 仿真引擎可以任意跨域下载并播放不同域名下的 .swf 游戏包与混合内容资源！
-      allowRunningInsecureContent: true, // 明确允许在 HTTPS 页面中加载 HTTP 混合内容，彻底破除 4399 游戏 iframe 被静默封杀的底层魔咒！
-      session: sess
-    }
-  });
-
-  tabViews.set(tabId, {
-    view,
-    isPrivate,
-    zoomLevel: 0
-  });
-
+function bindTabViewEvents(win, tabId, view, isPrivate) {
   const wc = view.webContents;
 
   wc.on('console-message', (event, level, message, line, sourceId) => {
@@ -679,8 +655,120 @@ function createTabView(win, tabId, url, isPrivate) {
     menu.popup();
   });
 
+  // 动态安全沙箱拦截监听器
+  const handleSandboxNavigationCheck = (event, targetUrl) => {
+    const wcPreferences = wc.getLastWebPreferences();
+    const currentWebSecurity = wcPreferences ? wcPreferences.webSecurity : true;
+    
+    const settings = store.get('settings') || {};
+    const isFlashMode = settings.flashMode !== false;
+    const isNewFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(targetUrl || '');
+    const targetWebSecurity = !(isFlashMode && isNewFlashSite);
+
+    if (currentWebSecurity !== targetWebSecurity) {
+      event.preventDefault();
+      console.log(`[Govg Sandbox Router] Navigating to ${targetUrl}. Recreating WebContentsView for sandbox transition: ${currentWebSecurity} -> ${targetWebSecurity}`);
+      
+      process.nextTick(() => {
+        recreateTabViewWithSandbox(win, tabId, targetUrl, isPrivate, targetWebSecurity);
+      });
+    }
+  };
+
+  wc.on('will-navigate', handleSandboxNavigationCheck);
+  wc.on('will-redirect', handleSandboxNavigationCheck);
+}
+
+function recreateTabViewWithSandbox(win, tabId, url, isPrivate, useWebSecurity) {
+  const tv = tabViews.get(tabId);
+  if (!tv) return;
+
+  const oldView = tv.view;
+  let oldBounds = null;
+  try {
+    oldBounds = oldView.getBounds();
+  } catch {}
+
+  try {
+    win.contentView.removeChildView(oldView);
+  } catch {}
+  
+  // 优雅异步销毁旧的 WebContents，释放系统资源
+  try {
+    oldView.webContents.destroy();
+  } catch {}
+  tabViews.delete(tabId);
+
+  const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
+  sess.setUserAgent(STANDARD_UA);
+
+  const newView = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'webview-preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      nodeIntegrationInSubFrames: true,
+      sandbox: false,
+      webSecurity: useWebSecurity,
+      allowRunningInsecureContent: !useWebSecurity,
+      session: sess
+    }
+  });
+
+  tabViews.set(tabId, {
+    view: newView,
+    isPrivate,
+    zoomLevel: tv.zoomLevel
+  });
+
+  if (oldBounds) {
+    newView.setBounds(oldBounds);
+  }
+
+  try {
+    win.contentView.addChildView(newView);
+  } catch {}
+
+  bindTabViewEvents(win, tabId, newView, isPrivate);
+
+  win.webContents.send('views:event', tabId, 'did-navigate', { url });
+  newView.webContents.loadURL(url).catch(() => {});
+}
+
+function createTabView(win, tabId, url, isPrivate) {
+  const sess = session.fromPartition(isPrivate ? 'incognito' : 'persist:govg-browser');
+  sess.setUserAgent(STANDARD_UA);
+  registerBlockerOnSession(sess);
+  registerDownloadOnSession(sess);
+
+  const settings = store.get('settings') || {};
+  const isFlashMode = settings.flashMode !== false;
+  const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(url || '');
+  const useWebSecurity = !(isFlashMode && isFlashSite);
+
+  const view = new WebContentsView({
+    webPreferences: {
+      preload: path.join(__dirname, 'webview-preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      nodeIntegrationInSubFrames: true,
+      sandbox: false,
+      webSecurity: useWebSecurity,
+      allowRunningInsecureContent: !useWebSecurity,
+      session: sess
+    }
+  });
+
+  tabViews.set(tabId, {
+    view,
+    isPrivate,
+    zoomLevel: 0
+  });
+
+  bindTabViewEvents(win, tabId, view, isPrivate);
+
   if (url && url !== 'swift://newtab') {
-    wc.loadURL(url).catch(() => {});
+    view.webContents.loadURL(url).catch(() => {});
   }
 }
 
