@@ -7,7 +7,7 @@ app.commandLine.appendSwitch('disable-site-isolation');
 app.commandLine.appendSwitch('allow-running-insecure-content');
 app.commandLine.appendSwitch('disable-features', 'BlockInsecurePrivateNetworkRequests');
 
-const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 GovgBrowser/0.4.2';
+const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 GovgBrowser/0.4.3';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -291,22 +291,6 @@ function registerBlockerOnSession(sess) {
     }
   });
 
-  // 针对 Flash 小游戏站点 (如 4399/7k7k 等) 动态重写发送的 HTTP 请求头中的 User-Agent 属性，确保服务端和前端检测皆绿灯放行
-  const FLASH_UA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36 QIHU 360EE";
-  sess.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
-    try {
-      const settings = store.get('settings') || {};
-      const isFlashMode = settings.flashMode !== false;
-      if (isFlashMode) {
-        const url = new URL(details.url);
-        const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(url.hostname);
-        if (isFlashSite) {
-          details.requestHeaders['User-Agent'] = FLASH_UA;
-        }
-      }
-    } catch {}
-    callback({ cancel: false, requestHeaders: details.requestHeaders });
-  });
 
   // 拦截并优化 CSP 头部，安全豁免 Ruffle.js 所需的 CDN (unpkg.com 和 cdn.jsdelivr.net) 及 blob: 协议，保障 Flash 仿真引擎在所有网站中完美运行
   sess.webRequest.onHeadersReceived(filter, (details, callback) => {

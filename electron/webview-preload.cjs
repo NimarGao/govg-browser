@@ -22,78 +22,8 @@ try {
   const antidetectScript = `
     (function() {
       try {
-        // 门哨校验：如果当前是非 Flash 的常规网站（如 Google，Github，Bing 等），坚决不进行任何一字节的代码注入与环境篡改，保持 100% 天然 Chromium 完美安全指纹环境！
-        const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(location.hostname);
-        if (!isFlashSite) {
-          return;
-        }
-
-        // 仅在 4399 等 Flash 游戏站点穿上“伪装戏服”以绕过其对运行环境的强行拦截
-        try {
-          const mockUA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36 QIHU 360EE";
-          Object.defineProperty(navigator, 'userAgent', {
-            get: () => mockUA
-          });
-          Object.defineProperty(navigator, 'appVersion', {
-            get: () => mockUA
-          });
-        } catch (e) {}
-
-        // 4. 模拟 plugins，完美伪装 Shockwave Flash 插件绕过 SWFObject 检测 (仅在 Flash 模式开启且在 Flash 相关站点时)
-        const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(location.hostname);
-        if (${isFlashModeEnabled} && isFlashSite) {
-          try {
-            const mockFlashPlugin = {
-              name: "Shockwave Flash",
-              description: "Shockwave Flash 32.0 r0",
-              filename: "pepflashplayer.dll",
-              length: 1,
-              item: function(index) { return this; },
-              namedItem: function(name) { return this; }
-            };
-            mockFlashPlugin[0] = {
-              type: "application/x-shockwave-flash",
-              suffixes: "swf",
-              description: "Shockwave Flash",
-              enabledPlugin: mockFlashPlugin
-            };
-
-            const mockPlugins = {
-              "Shockwave Flash": mockFlashPlugin,
-              length: 1,
-              item: function(index) { return mockFlashPlugin; },
-              namedItem: function(name) { return mockFlashPlugin; },
-              refresh: function() {}
-            };
-            mockPlugins[0] = mockFlashPlugin;
-
-            Object.defineProperty(navigator, 'plugins', {
-              get: () => mockPlugins
-            });
-
-            const mockMimeType = {
-              type: "application/x-shockwave-flash",
-              suffixes: "swf",
-              description: "Shockwave Flash",
-              enabledPlugin: mockFlashPlugin
-            };
-
-            const mockMimeTypes = {
-              "application/x-shockwave-flash": mockMimeType,
-              length: 1,
-              item: function(index) { return mockMimeType; },
-              namedItem: function(name) { return mockMimeType; }
-            };
-            mockMimeTypes[0] = mockMimeType;
-
-            Object.defineProperty(navigator, 'mimeTypes', {
-              get: () => mockMimeTypes
-            });
-            
-            // 注意：彻底移除以前 window.swfobject 的残缺 mock，避免与 Ruffle 内置的 swfobject 模拟库发生变量冲突和缺失函数引发的 JS 崩溃！
-          } catch (e) {}
-
-          // 4.5. 原型链防线：在 HTMLObjectElement/HTMLEmbedElement 的 prototype 上硬核注入 checkflash 恒返回 1 瞬间通关
+        if (${isFlashModeEnabled}) {
+          // 1. 原型链多媒体交互兜底：在 HTMLObjectElement/HTMLEmbedElement 的 prototype 上注入 checkflash 恒返回 1 以消除 4399 前端报错
           try {
             Object.defineProperty(HTMLObjectElement.prototype, 'checkflash', {
               get: () => function() { return 1; },
@@ -116,7 +46,7 @@ try {
             });
           } catch (e) {}
 
-          // 4.6. 全局拦截防线：使用 Object.defineProperty 的 getter/setter 拦截全局容器销毁方法，彻底免疫 4399 覆盖 swfdiv 游戏容器的行为
+          // 2. 全局拦截防线：使用 Object.defineProperty 的 getter/setter 拦截全局容器销毁方法，彻底免疫 4399 覆盖 swfdiv 游戏容器的行为
           try {
             Object.defineProperty(window, 'showBlockFlash', {
               get: () => function() { console.log('[Govg Defender] showBlockFlash was bypassed cleanly'); },
@@ -130,7 +60,7 @@ try {
             });
           } catch (e) {}
 
-          // 5. 自动载入 Ruffle Flash 仿真引擎，并装配强力 SWF 主动接管装载引擎
+          // 3. 自动载入 Ruffle Flash 仿真引擎，无损完成多媒体播放
           try {
             // 设置 Ruffle 官方的全局最佳用户体验配置
             window.RufflePlayer = window.RufflePlayer || {};
