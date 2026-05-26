@@ -4,8 +4,11 @@ import { fileURLToPath } from 'node:url';
 import Store from 'electron-store';
 
 app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
+app.commandLine.appendSwitch('disable-site-isolation');
+app.commandLine.appendSwitch('allow-running-insecure-content');
+app.commandLine.appendSwitch('disable-features', 'BlockInsecurePrivateNetworkRequests');
 
-const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 QIHU 360EE';
+const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 GovgBrowser/0.4.1';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -313,41 +316,25 @@ function registerBlockerOnSession(sess) {
     const isFlashMode = settings.flashMode !== false;
     
     if (isFlashMode) {
-      const cspKey = Object.keys(responseHeaders).find(k => k.toLowerCase() === 'content-security-policy');
-      if (cspKey) {
-        const cspValues = responseHeaders[cspKey];
-        if (Array.isArray(cspValues)) {
-          responseHeaders[cspKey] = cspValues.map(val => {
-            let modified = val;
-            
-            // 宽松豁免 unpkg 和 jsdelivr 的 script/connect/worker 等策略
-            if (modified.includes('script-src')) {
-              if (!modified.includes('https://unpkg.com')) {
-                modified = modified.replace('script-src', "script-src https://unpkg.com 'unsafe-eval' 'unsafe-inline'");
-              }
-              if (!modified.includes('https://cdn.jsdelivr.net')) {
-                modified = modified.replace('script-src', "script-src https://cdn.jsdelivr.net 'unsafe-eval' 'unsafe-inline'");
-              }
-            }
-            if (modified.includes('connect-src')) {
-              if (!modified.includes('https://unpkg.com')) {
-                modified = modified.replace('connect-src', 'connect-src https://unpkg.com');
-              }
-              if (!modified.includes('https://cdn.jsdelivr.net')) {
-                modified = modified.replace('connect-src', 'connect-src https://cdn.jsdelivr.net');
-              }
-            }
-            if (modified.includes('worker-src') && !modified.includes('blob:')) {
-              modified = modified.replace('worker-src', 'worker-src blob:');
-            } else if (modified.includes('child-src') && !modified.includes('blob:')) {
-              modified = modified.replace('child-src', 'child-src blob:');
-            } else if (!modified.includes('worker-src') && !modified.includes('child-src')) {
-              modified += "; worker-src blob:; child-src blob:";
-            }
-            return modified;
-          });
-        }
-      }
+      // 强效注入 CORS 响应头部，防止 Ruffle 引擎在加载跨域 .swf 游戏资源包时发生跨域阻断/一直在加载中卡死
+      const headerKeys = Object.keys(responseHeaders);
+      const corsOriginKey = headerKeys.find(k => k.toLowerCase() === 'access-control-allow-origin') || 'Access-Control-Allow-Origin';
+      responseHeaders[corsOriginKey] = ['*'];
+      
+      const corsMethodsKey = headerKeys.find(k => k.toLowerCase() === 'access-control-allow-methods') || 'Access-Control-Allow-Methods';
+      responseHeaders[corsMethodsKey] = ['GET', 'POST', 'OPTIONS', 'HEAD'];
+      
+      const corsHeadersKey = headerKeys.find(k => k.toLowerCase() === 'access-control-allow-headers') || 'Access-Control-Allow-Headers';
+      responseHeaders[corsHeadersKey] = ['*'];
+
+      // 彻底卸载任何可能导致 Ruffle 引擎、WebAssembly 或跨域网络请求受限的 CSP 限制，实现最顺畅的沙箱穿越
+      const cspKeys = Object.keys(responseHeaders).filter(k => {
+        const lower = k.toLowerCase();
+        return lower === 'content-security-policy' || lower === 'content-security-policy-report-only';
+      });
+      cspKeys.forEach(k => {
+        delete responseHeaders[k];
+      });
     }
     callback({ cancel: false, responseHeaders });
   });
@@ -598,6 +585,8 @@ function createTabView(win, tabId, url, isPrivate) {
       nodeIntegration: false,
       nodeIntegrationInSubFrames: true, // 确保 preload 脚本能完美注入到 subframe/iframe 子框架中运行，以实现 4399 游戏播放器的 Flash 仿真与遮罩剔除
       sandbox: false,
+      webSecurity: false, // 彻底禁用同源策略与混合内容安全检查，保障 Ruffle 仿真引擎可以任意跨域下载并播放不同域名下的 .swf 游戏包与混合内容资源！
+      allowRunningInsecureContent: true, // 明确允许在 HTTPS 页面中加载 HTTP 混合内容，彻底破除 4399 游戏 iframe 被静默封杀的底层魔咒！
       session: sess
     }
   });
@@ -609,6 +598,10 @@ function createTabView(win, tabId, url, isPrivate) {
   });
 
   const wc = view.webContents;
+
+  wc.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[TAB ${tabId} CONSOLE] [Level ${level}] ${message} (Source: ${sourceId}:${line})`);
+  });
 
   wc.on('did-start-loading', () => {
     win.webContents.send('views:event', tabId, 'did-start-loading');

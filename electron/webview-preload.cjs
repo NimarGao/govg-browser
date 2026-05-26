@@ -1,13 +1,24 @@
-const { ipcRenderer, webFrame } = require('electron');
+let ipcRenderer = null;
+let webFrame = null;
 
 try {
-  let isFlashModeEnabled = true;
+  const electron = require('electron');
+  ipcRenderer = electron.ipcRenderer;
+  webFrame = electron.webFrame;
+} catch (e) {
+  // 捕获在跨域沙箱子框架 iframe 中 require('electron') 抛出的安全限制异常，防止脚本崩溃中断执行
+}
+
+let isFlashModeEnabled = true;
+if (ipcRenderer) {
   try {
     isFlashModeEnabled = ipcRenderer.sendSync('settings:get-flash-mode-sync');
   } catch (e) {
     console.error('Failed to get flash mode status:', e);
   }
+}
 
+try {
   const antidetectScript = `
     (function() {
       try {
@@ -18,9 +29,12 @@ try {
           });
         }
 
-        // 1.5 全局伪装包含 360 极速浏览器后缀的高版本 User-Agent，既能完美登录谷歌等现代站点，又能彻底绕过国内 Flash 小游戏站点的 UA 强制拦截
+        // 1.5 精准区分域名的 User-Agent 伪装：仅在 4399 等 Flash 游戏站中启用 360EE 伪装，而在常规现代网站中老实诚信地声明自己为 GovgBrowser，避免指纹冲突与安全风控
         try {
-          const mockUA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 QIHU 360EE";
+          const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(location.hostname);
+          const mockUA = isFlashSite 
+            ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 QIHU 360EE"
+            : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 GovgBrowser/0.4.1";
           Object.defineProperty(navigator, 'userAgent', {
             get: () => mockUA
           });
@@ -148,8 +162,9 @@ try {
           });
         }
 
-        // 4. 模拟 plugins，完美伪装 Shockwave Flash 插件绕过 SWFObject 检测 (仅在 Flash 模式开启时)
-        if (${isFlashModeEnabled}) {
+        // 4. 模拟 plugins，完美伪装 Shockwave Flash 插件绕过 SWFObject 检测 (仅在 Flash 模式开启且在 Flash 相关站点时)
+        const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(location.hostname);
+        if (${isFlashModeEnabled} && isFlashSite) {
           try {
             const mockFlashPlugin = {
               name: "Shockwave Flash",
@@ -197,19 +212,69 @@ try {
             Object.defineProperty(navigator, 'mimeTypes', {
               get: () => mockMimeTypes
             });
-
-            // 注入 mock 版本的 swfobject.getFlashPlayerVersion 预热以绕过特定的 JS 库检测
-            window.swfobject = window.swfobject || {};
-            window.swfobject.getFlashPlayerVersion = function() {
-              return { major: 32, minor: 0, release: 0 };
-            };
+            
+            // 注意：彻底移除以前 window.swfobject 的残缺 mock，避免与 Ruffle 内置的 swfobject 模拟库发生变量冲突和缺失函数引发的 JS 崩溃！
           } catch (e) {}
 
-          // 5. 自动载入 Ruffle Flash 仿真引擎，无缝支持 4399 等 Flash 小游戏
+          // 4.5. 原型链防线：在 HTMLObjectElement/HTMLEmbedElement 的 prototype 上硬核注入 checkflash 恒返回 1 瞬间通关
           try {
+            Object.defineProperty(HTMLObjectElement.prototype, 'checkflash', {
+              get: () => function() { return 1; },
+              configurable: true
+            });
+            Object.defineProperty(HTMLEmbedElement.prototype, 'checkflash', {
+              get: () => function() { return 1; },
+              configurable: true
+            });
+
+            // 积分小游戏交互方法 mock，防止 AS 脚本交互崩溃
+            const mockMethods = ['submitscore', 'linkAs3', 'cutshot', 'toggleSound', 'toggleGame'];
+            mockMethods.forEach(method => {
+              if (!HTMLObjectElement.prototype[method]) {
+                HTMLObjectElement.prototype[method] = function() { return 0; };
+              }
+              if (!HTMLEmbedElement.prototype[method]) {
+                HTMLEmbedElement.prototype[method] = function() { return 0; };
+              }
+            });
+          } catch (e) {}
+
+          // 4.6. 全局拦截防线：使用 Object.defineProperty 的 getter/setter 拦截全局容器销毁方法，彻底免疫 4399 覆盖 swfdiv 游戏容器的行为
+          try {
+            Object.defineProperty(window, 'showBlockFlash', {
+              get: () => function() { console.log('[Govg Defender] showBlockFlash was bypassed cleanly'); },
+              set: (v) => {},
+              configurable: true
+            });
+            Object.defineProperty(window, 'showBlockFlashIE', {
+              get: () => function() { console.log('[Govg Defender] showBlockFlashIE was bypassed cleanly'); },
+              set: (v) => {},
+              configurable: true
+            });
+          } catch (e) {}
+
+          // 5. 自动载入 Ruffle Flash 仿真引擎，并装配强力 SWF 主动接管装载引擎
+          try {
+            // 设置 Ruffle 官方的全局最佳用户体验配置
+            window.RufflePlayer = window.RufflePlayer || {};
+            window.RufflePlayer.config = {
+              "autoplay": "on",
+              "unmuteOverlay": "hidden",
+              "letterbox": "on",
+              "warnOnUnsupportedContent": false,
+              "polyfill": true
+            };
+
             const ruffleScript = document.createElement('script');
-            // 使用 jsdelivr CDN 作为首选，稳定且加载极快，支持 subframe
-            ruffleScript.src = 'https://cdn.jsdelivr.net/npm/@ruffle-rs/ruffle';
+            // 使用国内极速镜像 JSDMirror 的完整 ruffle.js 浏览器打包路径，确保 100% 成功加载和极速响应，并提供 unpkg.com 作为坚实后盾
+            ruffleScript.src = 'https://cdn.jsdmirror.com/npm/@ruffle-rs/ruffle/ruffle.js';
+            ruffleScript.onerror = () => {
+              const fallback = document.createElement('script');
+              fallback.src = 'https://unpkg.com/@ruffle-rs/ruffle';
+              fallback.async = true;
+              const container = document.head || document.documentElement;
+              if (container) container.appendChild(fallback);
+            };
             ruffleScript.async = true;
             
             // 安全挂载逻辑，优先注入到已存在的主体标签中，避免在 document_start 阶段 document.head 为 null 的问题
@@ -221,12 +286,102 @@ try {
                 (document.head || document.documentElement).appendChild(ruffleScript);
               });
             }
+
+            // 5.5 【核心突破】强强联手的 SWF 主动捕获接管引擎：周期性扫描 DOM 树并强行秒级渲染 SWF 资源
+            const runRuffleActiveInterceptor = () => {
+              if (!window.RufflePlayer) return;
+              
+              const candidates = document.querySelectorAll('embed, object');
+              candidates.forEach(el => {
+                if (el.getAttribute('data-ruffle-intercepted') === 'true') return;
+                
+                let swfUrl = null;
+                if (el.tagName.toLowerCase() === 'embed') {
+                  swfUrl = el.getAttribute('src');
+                } else if (el.tagName.toLowerCase() === 'object') {
+                  swfUrl = el.getAttribute('data');
+                  if (!swfUrl) {
+                    const movieParam = el.querySelector('param[name="movie"]');
+                    if (movieParam) swfUrl = movieParam.getAttribute('value');
+                  }
+                  if (!swfUrl) {
+                    const srcParam = el.querySelector('param[name="src"]');
+                    if (srcParam) swfUrl = srcParam.getAttribute('value');
+                  }
+                }
+                
+                // 深度提取属性中隐藏的 swf url 兜底
+                if (!swfUrl) {
+                  const attrs = el.attributes;
+                  for (let i = 0; i < attrs.length; i++) {
+                    if (/\.swf/i.test(attrs[i].value)) {
+                      swfUrl = attrs[i].value;
+                      break;
+                    }
+                  }
+                }
+                
+                if (swfUrl) {
+                  el.setAttribute('data-ruffle-intercepted', 'true');
+                  try {
+                    const ruffle = window.RufflePlayer.newest();
+                    if (ruffle) {
+                      const player = ruffle.createPlayer();
+                      
+                      // 完美克隆并应用原有节点的所有尺寸和 CSS 属性
+                      player.style.width = el.style.width || el.getAttribute('width') || '100%';
+                      player.style.height = el.style.height || el.getAttribute('height') || '100%';
+                      if (el.id) player.id = el.id;
+                      if (el.className) player.className = el.className;
+                      
+                      player.style.display = 'block';
+                      player.style.visibility = 'visible';
+                      
+                      // 主动进行 DOM 的替换，杜绝 Chromium 原生 embed 失效引发的加载卡死
+                      const parent = el.parentNode;
+                      if (parent) {
+                        parent.replaceChild(player, el);
+                        
+                        // 强制拉起 Ruffle SWF 装载
+                        player.load({
+                          url: swfUrl,
+                          allowScriptAccess: true
+                        });
+                        console.log('[Govg Active Ruffle] Hijacked embed/object successfully. URL:', swfUrl);
+                      }
+                    }
+                  } catch (err) {
+                    console.error('[Govg Active Ruffle] Hijack failed:', err);
+                  }
+                }
+              });
+            };
+
+            // 高频 250ms 主动触发扫描，确保无论页面以何种异步 JS 渲染，均能即刻秒杀接管
+            setInterval(runRuffleActiveInterceptor, 250);
+            window.addEventListener('DOMContentLoaded', runRuffleActiveInterceptor);
+            window.addEventListener('load', runRuffleActiveInterceptor);
           } catch (e) {}
 
-          // 6. 自动化屏蔽/剔除 4399 等小游戏站点中由于前端异步检测可能产生的“不支持”或“推荐下载”拦截遮罩层，保障底层 Flash/Ruffle 游戏界面完美呈现
+          // 6. 自动化屏蔽/剔除 4399 等小游戏站点中由于前端检测可能产生的拦截遮罩层，保障底层 Ruffle 游戏界面完美呈现
           try {
+            // A. 先注入一层强效全局 CSS 规则，确保哪怕元素是异步渲染出来的，浏览器也能在瞬间隐藏它
+            const style = document.createElement('style');
+            style.innerHTML = `
+              #error_tips, #error-tips, #flash-tips, .flash-tips, .p-tips, .p-mask, .p-box,
+              .no-flash-tip, .flash-tip, .flash-upgrade, .flash_upgrade, #p_player_mask, #p_player_tips {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                pointer-events: none !important;
+                z-index: -9999 !important;
+              }
+            `;
+            const styleContainer = document.head || document.documentElement;
+            if (styleContainer) styleContainer.appendChild(style);
+
             const hideFlashBanners = () => {
-              // 4399 等站点常见的阻断弹窗与遮罩元素特征 ID 和 Class
+              // B. 动态覆盖 selectors 样式以确保隐藏
               const selectors = [
                 '#error_tips', '#error-tips', '#flash-tips', '.flash-tips', '.p-tips', '.p-mask', '.p-box',
                 '.no-flash-tip', '.flash-tip', '.flash-upgrade', '.flash_upgrade', '#p_player_mask', '#p_player_tips'
@@ -237,39 +392,29 @@ try {
                   nodes.forEach(node => {
                     node.style.setProperty('display', 'none', 'important');
                     node.style.setProperty('visibility', 'hidden', 'important');
-                    node.style.setProperty('opacity', '0', 'important');
-                    node.style.setProperty('z-index', '-9999', 'important');
                     node.style.setProperty('pointer-events', 'none', 'important');
                   });
                 } catch(e) {}
               });
 
-              // 递归向上遍历 DOM 并隐藏包含特定关键字的容器
-              const walker = document.createTreeWalker(
-                document.body || document.documentElement,
-                NodeFilter.SHOW_TEXT,
-                null,
-                false
-              );
-              let node;
-              while (node = walker.nextNode()) {
-                const txt = node.textContent;
-                if (txt && (txt.includes('当前浏览器或模式不支持') || txt.includes('请下载Flash官方插件') || txt.includes('其他浏览器（如：Google Chrome'))) {
-                  let parent = node.parentElement;
-                  let depth = 0;
-                  while (parent && parent !== document.body && parent !== document.documentElement && depth < 5) {
-                    const style = window.getComputedStyle(parent);
-                    if (style.position === 'fixed' || style.position === 'absolute' || parent.tagName === 'DIV') {
-                      parent.style.setProperty('display', 'none', 'important');
-                      parent.style.setProperty('visibility', 'hidden', 'important');
-                      parent.style.setProperty('pointer-events', 'none', 'important');
+              // C. 强效 innerText 高频模糊匹配：对包含不支持/插件等关键词的特定弹出容器直接进行爆破屏蔽
+              try {
+                const divs = document.querySelectorAll('div');
+                divs.forEach(div => {
+                  if (div.innerText && (
+                    div.innerText.includes('当前浏览器或模式不支持') || 
+                    div.innerText.includes('请下载Flash官方插件') || 
+                    div.innerText.includes('推荐下载：')
+                  )) {
+                    const style = window.getComputedStyle(div);
+                    if (style.position === 'fixed' || style.position === 'absolute' || div.id.includes('tip') || div.className.includes('tip') || div.id.includes('error')) {
+                      div.style.setProperty('display', 'none', 'important');
+                      div.style.setProperty('visibility', 'hidden', 'important');
+                      div.style.setProperty('pointer-events', 'none', 'important');
                     }
-                    parent = parent.parentElement;
-                    depth++;
                   }
-                  node.parentElement.style.setProperty('display', 'none', 'important');
-                }
-              }
+                });
+              } catch(e) {}
             };
 
             // 尽早在 DOM 生成时处理
@@ -282,14 +427,43 @@ try {
             // 兼容各种加载阶段
             window.addEventListener('DOMContentLoaded', hideFlashBanners);
             window.addEventListener('load', hideFlashBanners);
-            setInterval(hideFlashBanners, 500); // 兜底轮询
+            setInterval(hideFlashBanners, 200); // 200ms 高频轮询，彻底扫除死角
           } catch(e) {}
         }
       } catch (e) {}
     })();
   `;
-  webFrame.executeJavaScript(antidetectScript);
+
+  if (webFrame) {
+    try {
+      webFrame.executeJavaScript(antidetectScript);
+    } catch (e) {
+      injectViaDOM(antidetectScript);
+    }
+  } else {
+    injectViaDOM(antidetectScript);
+  }
 } catch (e) {}
+
+function injectViaDOM(scriptText) {
+  try {
+    const script = document.createElement('script');
+    script.textContent = scriptText;
+    const container = document.head || document.documentElement;
+    if (container) {
+      container.appendChild(script);
+      script.remove();
+    } else {
+      document.addEventListener('DOMContentLoaded', () => {
+        const c = document.head || document.documentElement;
+        if (c) {
+          c.appendChild(script);
+          script.remove();
+        }
+      });
+    }
+  } catch (e) {}
+}
 
 function getFieldLabel(input) {
   const form = input.form;
