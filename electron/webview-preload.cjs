@@ -22,19 +22,15 @@ try {
   const antidetectScript = `
     (function() {
       try {
-        // 1. 抹除 webdriver 特征
-        if (navigator.webdriver !== undefined) {
-          Object.defineProperty(navigator, 'webdriver', {
-            get: () => undefined
-          });
+        // 门哨校验：如果当前是非 Flash 的常规网站（如 Google，Github，Bing 等），坚决不进行任何一字节的代码注入与环境篡改，保持 100% 天然 Chromium 完美安全指纹环境！
+        const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(location.hostname);
+        if (!isFlashSite) {
+          return;
         }
 
-        // 1.5 精准区分域名的 User-Agent 伪装：仅在 4399 等 Flash 游戏站中启用 360EE 伪装，而在常规现代网站中老实诚信地声明自己为 GovgBrowser，避免指纹冲突与安全风控
+        // 仅在 4399 等 Flash 游戏站点穿上“伪装戏服”以绕过其对运行环境的强行拦截
         try {
-          const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(location.hostname);
-          const mockUA = isFlashSite 
-            ? "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 QIHU 360EE"
-            : "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 GovgBrowser/0.4.1";
+          const mockUA = "Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/86.0.4240.198 Safari/537.36 QIHU 360EE";
           Object.defineProperty(navigator, 'userAgent', {
             get: () => mockUA
           });
@@ -42,125 +38,6 @@ try {
             get: () => mockUA
           });
         } catch (e) {}
-
-        // 2. 模拟完整的 window.chrome 属性，避免谷歌等风控校验报错
-        const mockChrome = {
-          app: {
-            isInstalled: false,
-            InstallState: {
-              DISABLED: 'disabled',
-              INSTALLED: 'installed',
-              NOT_INSTALLED: 'not_installed'
-            },
-            runningState: {
-              CANNOT_RUN: 'cannot_run',
-              READY_TO_RUN: 'ready_to_run',
-              RUNNING: 'running'
-            }
-          },
-          runtime: {
-            OnInstalledReason: {
-              CHROME_UPDATE: 'chrome_update',
-              INSTALL: 'install',
-              SHARED_MODULE_UPDATE: 'shared_module_update',
-              UPDATE: 'update'
-            },
-            OnRestartRequiredReason: {
-              APP_UPDATE: 'app_update',
-              OS_UPDATE: 'os_update',
-              PERIODIC: 'periodic'
-            },
-            PlatformArch: {
-              ARM: 'arm',
-              ARM64: 'arm64',
-              MIPS: 'mips',
-              MIPS64: 'mips64',
-              X86_32: 'x86-32',
-              X86_64: 'x86-64'
-            },
-            PlatformNaclArch: {
-              ARM: 'arm',
-              MIPS: 'mips',
-              MIPS64: 'mips64',
-              X86_32: 'x86-32',
-              X86_64: 'x86-64'
-            },
-            PlatformOs: {
-              ANDROID: 'android',
-              CROS: 'cros',
-              LINUX: 'linux',
-              MAC: 'mac',
-              OPENBSD: 'openbsd',
-              WIN: 'win'
-            },
-            RequestUpdateCheckStatus: {
-              NO_UPDATE: 'no_update',
-              THROTTLED: 'throttled',
-              UPDATE_AVAILABLE: 'update_available'
-            }
-          },
-          csi: function() {
-            return {
-              startE: Date.now() - 100,
-              onloadT: Date.now(),
-              pageT: 100,
-              tran: 0
-            };
-          },
-          loadTimes: function() {
-            return {
-              requestTime: (Date.now() - 200) / 1000,
-              startLoadTime: (Date.now() - 190) / 1000,
-              commitLoadTime: (Date.now() - 100) / 1000,
-              finishDocumentLoadTime: (Date.now() - 50) / 1000,
-              finishLoadTime: Date.now() / 1000,
-              firstPaintTime: (Date.now() - 80) / 1000,
-              firstPaintAfterLoadTime: 0,
-              navigationType: 'Other',
-              wasAlternateProtocolAvailable: false,
-              wasFetchedViaSpdy: false,
-              wasNpnNegotiated: false,
-              npnNegotiatedProtocol: '',
-              wasUrlOverridden: false
-            };
-          }
-        };
-
-        if (!window.chrome || !window.chrome.loadTimes) {
-          Object.defineProperty(window, 'chrome', {
-            get: () => mockChrome
-          });
-        }
-
-        // 3. 模拟 User-Agent Client Hints
-        if (!navigator.userAgentData) {
-          const mockUserAgentData = {
-            brands: [
-              { brand: 'Not/A)Brand', version: '8' },
-              { brand: 'Chromium', version: '124' },
-              { brand: 'Google Chrome', version: '124' }
-            ],
-            mobile: false,
-            platform: 'Windows',
-            getHighEntropyValues: (hints) => Promise.resolve({
-              brands: [
-                { brand: 'Not/A)Brand', version: '8' },
-                { brand: 'Chromium', version: '124' },
-                { brand: 'Google Chrome', version: '124' }
-              ],
-              mobile: false,
-              platform: 'Windows',
-              platformVersion: '10.0.0',
-              architecture: 'x86',
-              bitness: '64',
-              model: '',
-              uaFullVersion: '124.0.0.0'
-            })
-          };
-          Object.defineProperty(navigator, 'userAgentData', {
-            get: () => mockUserAgentData
-          });
-        }
 
         // 4. 模拟 plugins，完美伪装 Shockwave Flash 插件绕过 SWFObject 检测 (仅在 Flash 模式开启且在 Flash 相关站点时)
         const isFlashSite = /4399|7k7k|2144|flash|game|7k7kimg|4399img|bdimg|swf/i.test(location.hostname);

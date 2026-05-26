@@ -3,12 +3,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Store from 'electron-store';
 
-app.commandLine.appendSwitch('disable-blink-features', 'AutomationControlled');
 app.commandLine.appendSwitch('disable-site-isolation');
 app.commandLine.appendSwitch('allow-running-insecure-content');
 app.commandLine.appendSwitch('disable-features', 'BlockInsecurePrivateNetworkRequests');
 
-const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 GovgBrowser/0.4.1';
+const STANDARD_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 GovgBrowser/0.4.2';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.env.NODE_ENV === 'development';
 
